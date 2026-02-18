@@ -1,5 +1,7 @@
 # OSAL 与 SYNC 的职责边界说明（最终版）
 
+> 分层总依赖矩阵以 `awlf/document/architecture/分层与依赖规范.md` 为唯一规范源；本文只描述 OSAL 与 SYNC 的语义职责边界。
+
 ## 1. 核心结论（先给结论）
 
 > **OSAL 与 SYNC 的根本区别不在于“抽象层级高低”，

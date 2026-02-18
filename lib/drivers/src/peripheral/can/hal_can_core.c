@@ -338,10 +338,18 @@ static AwlfRet_e _can_status_manager_init(HalCanHandler_t Can)
         return AWLF_ERROR_BUSY;
     CanStatusManager_t StatusManager;
     char* name = device_get_name(&Can->parent);
+    osal_status_t osal_status;
     StatusManager = &Can->statusManager;
-    StatusManager->statusTimer = osal_timer_create(name, Can->cfg.statusCheckTimeout, 1, (void*)Can, _can_status_timer_cb);
-    int ret = osal_timer_start(StatusManager->statusTimer, Can->cfg.statusCheckTimeout);
-    if (ret != OSAL_OK)
+    osal_status = osal_timer_create(&StatusManager->statusTimer, name, Can->cfg.statusCheckTimeout, OSAL_TIMER_PERIODIC,
+                                    (void*)Can, _can_status_timer_cb);
+    if (osal_status != OSAL_OK)
+    {
+        // TODO: ASSERT
+        return AWLF_ERROR_MEMORY;
+    }
+
+    osal_status = osal_timer_start(StatusManager->statusTimer, Can->cfg.statusCheckTimeout);
+    if (osal_status != OSAL_OK)
     {
         // TODO: ASSERT
         return AWLF_ERROR_TIMEOUT;

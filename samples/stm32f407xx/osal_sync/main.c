@@ -287,12 +287,18 @@ static void _edge_thread(void* arg)
 
     /* 定时器边界测试 */
     {
+        osal_timer_t timer = NULL;
+
         tests++;
-        if (osal_timer_create("bad_timer", 0U, 1, NULL, _timer_cb) != NULL)
+        if (osal_timer_create(NULL, "bad_timer", 1U, OSAL_TIMER_PERIODIC, NULL, _timer_cb) != OSAL_INVALID)
             failures++;
 
         tests++;
-        if (osal_timer_create("bad_timer2", 1U, 1, NULL, NULL) != NULL)
+        if (osal_timer_create(&timer, "bad_timer", 0U, OSAL_TIMER_PERIODIC, NULL, _timer_cb) != OSAL_INVALID)
+            failures++;
+
+        tests++;
+        if (osal_timer_create(&timer, "bad_timer2", 1U, OSAL_TIMER_PERIODIC, NULL, NULL) != OSAL_INVALID)
             failures++;
     }
 
@@ -352,8 +358,7 @@ int main(void)
         return -1;
 
     /* 创建并启动定时器 */
-    g_timer = osal_timer_create("osal_timer", TEST_TIMER_MS, 1, NULL, _timer_cb);
-    if (!g_timer)
+    if (osal_timer_create(&g_timer, "osal_timer", TEST_TIMER_MS, OSAL_TIMER_PERIODIC, NULL, _timer_cb) != OSAL_OK)
         return -1;
     if (osal_timer_start(g_timer, OSAL_WAIT_FOREVER) != OSAL_OK)
         return -1;

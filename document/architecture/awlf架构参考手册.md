@@ -906,6 +906,7 @@
 - 内部宏
   - `__AWLF_OSAL_TIMER_H__`
 - 外部类型
+  - `osal_timer_mode_t`
   - `osal_timer_t`
 - 内部类型
   - 无
@@ -913,6 +914,7 @@
   - `osal_timer_create`
   - `osal_timer_start`
   - `osal_timer_stop`
+  - `osal_timer_reset`
   - `osal_timer_delete`
   - `osal_timer_get_id`
   - `osal_timer_set_id`
@@ -1251,7 +1253,7 @@
 - `diagnostics`
 - `event`
 - `fs`
-- `ipc`
+- `comm`
 - `log`
 
 ### 入口文件

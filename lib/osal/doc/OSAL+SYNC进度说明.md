@@ -18,14 +18,14 @@
   - `awlf/lib/osal/include/osal/osal_time.h`
   - `awlf/platform/osal/freertos/osal_time_freertos.c`
   - `awlf/platform/osal/freertos/osal_time_freertos.h`
-  - `awlf/samples/stm32f407/osal_time/main.c`
+  - `awlf/samples/stm32f407xx/osal_time/main.c`
 
 ## 2. 阶段总览（按阶段原地维护）
 
 | 阶段 | 验收结论 | 当前状态 | 代码证据 | 验证状态 | 未解决问题 |
 | --- | --- | --- | --- | --- | --- |
 | Phase 0 | 已阶段验收（按既定“规划-确认-执行”完成） | 已冻结，进入维护态 | `awlf/lib/osal/doc/OSAL+SYNC重构计划.md`、`awlf/lib/osal/doc/OSAL+SYNC顶层设计指南ForAGENTS.md` | 已完成边界冻结与阶段确认 | 需继续按阶段补齐“验收证据可追溯”记录 |
-| Phase 1 | 部分验收通过（time + core + thread + semaphore + mutex + queue + event_flags 子域机制重构完成） | 进行中（time/core/thread/semaphore/mutex/queue/event_flags 已落地） | `awlf/lib/osal/include/osal/osal_time.h`、`awlf/platform/osal/freertos/osal_time_freertos.c`、`awlf/platform/osal/freertos/osal_time_freertos.h`、`awlf/samples/stm32f407/osal_time/main.c`、`awlf/lib/osal/include/osal/osal_core.h`、`awlf/platform/osal/freertos/osal_core_freertos.c`、`awlf/lib/osal/include/osal/osal_queue.h`、`awlf/platform/osal/freertos/osal_queue_freertos.c`、`awlf/samples/stm32f407/osal_queue/main.c`、`awlf/lib/osal/include/osal/osal_event.h`、`awlf/platform/osal/freertos/osal_event_freertos.c`、`awlf/samples/stm32f407/osal_event/main.c`、`awlf/lib/source/sync/completion.c`、`awlf/platform/sync/freertos/completion_notify.c`、`awlf/lib/osal/include/osal/osal_thread.h`、`awlf/platform/osal/freertos/osal_thread_freertos.c`、`awlf/lib/osal/include/osal/osal_sem.h`、`awlf/platform/osal/freertos/osal_sem_freertos.c`、`awlf/lib/osal/include/osal/osal_mutex.h`、`awlf/platform/osal/freertos/osal_mutex_freertos.c`、`awlf/samples/stm32f407/osal_sync/main.c` | `xmake build robot_project` 已通过 | OSAL 其他原语待逐项审计与机制重构；需持续跟踪非 1kHz tick 等价性与后续新增线程栈参数是否遵循字节语义 |
+| Phase 1 | 部分验收通过（time + core + thread + semaphore + mutex + queue + event_flags + timer 子域机制重构完成） | 进行中（time/core/thread/semaphore/mutex/queue/event_flags/timer 已落地） | `awlf/lib/osal/include/osal/osal_time.h`、`awlf/platform/osal/freertos/osal_time_freertos.c`、`awlf/platform/osal/freertos/osal_time_freertos.h`、`awlf/samples/stm32f407xx/osal_time/main.c`、`awlf/lib/osal/include/osal/osal_core.h`、`awlf/platform/osal/freertos/osal_core_freertos.c`、`awlf/lib/osal/include/osal/osal_queue.h`、`awlf/platform/osal/freertos/osal_queue_freertos.c`、`awlf/samples/stm32f407xx/osal_queue/main.c`、`awlf/lib/osal/include/osal/osal_event.h`、`awlf/platform/osal/freertos/osal_event_freertos.c`、`awlf/samples/stm32f407xx/osal_event/main.c`、`awlf/lib/source/sync/completion.c`、`awlf/platform/sync/freertos/completion_notify.c`、`awlf/lib/osal/include/osal/osal_thread.h`、`awlf/platform/osal/freertos/osal_thread_freertos.c`、`awlf/lib/osal/include/osal/osal_sem.h`、`awlf/platform/osal/freertos/osal_sem_freertos.c`、`awlf/lib/osal/include/osal/osal_mutex.h`、`awlf/platform/osal/freertos/osal_mutex_freertos.c`、`awlf/lib/osal/include/osal/osal_timer.h`、`awlf/platform/osal/freertos/osal_timer_freertos.c`、`awlf/samples/stm32f407xx/osal_timer/main.c` | `xmake build robot_project` 已通过 | OSAL 其他原语待逐项审计与机制重构；需持续跟踪非 1kHz tick 等价性与后续新增线程栈参数是否遵循字节语义 |
 | Phase 2 | 待验收 | 待开始 | 待补录 | 待补录 | 待分原语逐项审计 |
 | Phase 3 | 待验收 | 待开始 | 待补录 | 待补录 | 待分原语逐项审计 |
 | Phase 4 | 待验收 | 待开始 | 待补录 | 待补录 | 待补录 |
@@ -41,7 +41,7 @@
 
 ### 3.2 Phase 1（OSAL 最小原语）
 
-- 验收结论：部分验收通过（time + core + thread + semaphore + mutex + queue + event_flags 子域）。
+- 验收结论：部分验收通过（time + core + thread + semaphore + mutex + queue + event_flags + timer 子域）。
 - 已落地实现进度（time）：
   - `osal_delay_until` 参数语义已统一为 in/out 游标 `deadline_cursor_ms`。
   - 周期延时主路径优先使用 `xTaskDelayUntil`，并保留宏关闭时回退路径。
@@ -58,7 +58,7 @@
   - `osal_thread_create/join/terminate/yield/exit/kernel_start` 已统一线程上下文约束（ISR 误用：断言 + 安全返回）。
   - `osal_thread_terminate` 已保留 `terminate(other)` 机制语义，并完成风险标注：不承诺自动回收目标线程持有的业务资源。
   - `terminate(self)` 已收敛为 `OSAL_INVALID`，强制改用 `osal_thread_exit` 自退出。
-  - 新增独立样例：`awlf/samples/stm32f407/osal_thread/main.c`，覆盖 create/self/yield/join/terminate 核心边界。
+  - 新增独立样例：`awlf/samples/stm32f407xx/osal_thread/main.c`，覆盖 create/self/yield/join/terminate 核心边界。
   - `awlf/samples/stm32f407` 下已完成线程栈参数迁移：历史按 word 编写的栈配置已显式换算为字节表达（`* OSAL_STACK_WORD_BYTES`）。
 - 已落地实现进度（semaphore）：
   - `osal_sem_wait(OSAL_WAIT_FOREVER)` 保持无限等待语义，不做降级。
@@ -76,7 +76,7 @@
   - FreeRTOS 后端已移除本地 `registry` 影子状态，查询主路径优先采用官方接口。
   - `send/recv/peek` 的 ISR 版本已收敛为上下文强约束（误用：断言 + 安全返回）。
   - ISR 满/空路径返回码已收敛为业务语义 `OSAL_WOULD_BLOCK`，不再错误归类为 `OSAL_INTERNAL`。
-  - 新增独立样例：`awlf/samples/stm32f407/osal_queue/main.c`，用于 queue 合同边界验证。
+  - 新增独立样例：`awlf/samples/stm32f407xx/osal_queue/main.c`，用于 queue 合同边界验证。
 - 已落地实现进度（event_flags）：
   - `create/delete/set/clear/wait` 已统一线程上下文约束（误用：断言 + 安全返回）。
   - `set_from_isr` 已收敛为 ISR-only 合同（误用：断言 + 安全返回）。
@@ -85,11 +85,19 @@
   - FreeRTOS 端已在 `awlf/platform/osal/freertos/xmake.lua` 注入 `AWLF_OSAL_EVENT_FLAGS_USABLE_MASK=0x00FFFFFFu`。
   - FreeRTOS 后端已统一对 `set/clear/wait/set_from_isr` 输入位进行掩码校验，超出掩码返回 `OSAL_INVALID`。
   - `wait` 输出值已收敛为仅返回可用业务位，屏蔽底层控制位。
-  - 独立样例 `awlf/samples/stm32f407/osal_event/main.c` 已补充非法高位输入验证，并保留 `wait_any/wait_all/no_clear/timeout` 核心语义覆盖。
+  - 独立样例 `awlf/samples/stm32f407xx/osal_event/main.c` 已补充非法高位输入验证，并保留 `wait_any/wait_all/no_clear/timeout` 核心语义覆盖。
+- 已落地实现进度（timer）：
+  - `osal_timer_create` 已升级为 `status + out_handle` 形态，去除“句柄或 NULL”混合语义。
+  - 新增 `osal_timer_mode_t`，明确 `one-shot/periodic` 模式语义，替代裸 `auto_reload` 参数。
+  - 新增 `osal_timer_reset`，并固定“重启/重装（rearm）”合同：未运行态 reset 等价 start。
+  - `create/start/stop/reset/delete/get_id/set_id` 已统一线程上下文约束（ISR 误用：断言 + 安全返回）。
+  - `start/stop/reset/delete` 命令未入队时的返回码已收敛为等待语义映射：
+    `timeout=0 -> OSAL_WOULD_BLOCK`，`timeout>0/OSAL_WAIT_FOREVER -> OSAL_TIMEOUT`。
+  - 新增独立样例：`awlf/samples/stm32f407xx/osal_timer/main.c`，覆盖 create/start/stop/reset/delete/get_id/set_id 核心边界。
 - 未完成范围：
-  - `join` 真实等待后端仍未落地（当前 FreeRTOS 端为 `OSAL_NOT_SUPPORTED`）；timer 等原语仍待逐项审计与机制重构。
+  - `join` 真实等待后端仍未落地（当前 FreeRTOS 端为 `OSAL_NOT_SUPPORTED`）；OSAL 其余原语仍待逐项审计与机制重构。
 - 待做事项（下一项）：
-  - timer 原语语义重构（合同冻结 -> FreeRTOS 机制收敛 -> 样例边界验证）。
+  - thread join 语义重构（合同冻结 -> FreeRTOS 可行性收敛 -> 样例边界验证）。
 
 ### 3.3 Phase 2（SYNC reference）
 

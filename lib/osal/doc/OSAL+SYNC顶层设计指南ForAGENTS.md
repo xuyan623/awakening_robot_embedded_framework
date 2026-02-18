@@ -12,6 +12,7 @@
 
 本规范关注：接口、语义、返回码、超时规则、并发与 ISR 约束、模块依赖与演进路径。
 本规范不涵盖：文件系统/网络/进程等 Linux 特有能力（建议放入 service 层适配）。
+分层总依赖矩阵以 `awlf/document/architecture/分层与依赖规范.md` 为准，本文只定义 OSAL+SYNC 专项约束。
 
 ------
 
@@ -134,17 +135,18 @@
 - **driver**：设备驱动（电机、串口、CAN…），对上提供抽象接口（vtable/ops）
 - **osal**：最小 OS 原语（线程/锁/队列/事件标志/时间/临界区/内存等）
 - **sync**：稳定同步语义（completion/event 等）
-- **service**：日志、诊断、IPC、文件系统抽象等
+- **service**：日志、诊断、comm、文件系统抽象等
 - **system**：系统级组件与控制逻辑
 
 ### 3.2 依赖方向（强制）
 
 - `system` → 依赖 `service` / `sync`
-- `service` → 优先依赖 `sync`，必要时依赖 `osal`
+- `service(core)` → 优先依赖 `sync`，必要时依赖 `osal`，不直接依赖 `drivers`
+- `comm adapter(impl)` → 依赖 `services/comm` + `drivers`（实现侧接入层）
 - `lib\source\sync` → **只依赖 `osal`**
 - `sync/<os>` → 可使用 OS 原生机制优化，但不得泄漏到 sync 公共头文件
 - `osal` → 不得依赖 `sync`
-- `driver` → 可依赖 `osal` 的 ISR-safe 子集（见 8.x），不得依赖 OS 原生 API
+- `driver(core)` → 可依赖 `osal` 的 ISR-safe 子集（见 8.x），不得依赖 OS 原生 API，也不得依赖 `services`
 - `bsp` → 不得依赖 `osal/sync`，保持硬件层纯净（OS 无关为目标）
 
 > 注：driver 是否依赖 sync 取决于你的驱动策略。推荐：driver 内部使用 OSAL ISR-safe 原语做快路径，上层通过 sync 组合出业务语义。
@@ -273,6 +275,17 @@ OSAL **不负责** 定义复杂协作语义或状态机。
 - OSAL 不承诺自动回收目标线程持有的业务资源（锁/外设/应用内存）。
 - `terminate(self)` 视为非法调用，必须使用 `osal_thread_exit` 自退出。
 - 推荐默认路径仍为协作退出；`terminate(other)` 仅用于受控场景。
+
+### 7.8 timer 专项合同（v1.0）
+
+- `osal_timer_create` 采用 `OSAL status + out_handle` 形态，禁止返回“句柄或 NULL”混合语义。
+- `timer` v1.0 为线程上下文接口，不提供 `*_from_isr` 版本。
+- `osal_timer_reset` 语义固定为“重启/重装（rearm）”：未运行时等价 `start`。
+- `osal_timer_delete` 采用严格前置条件模型：调用方必须确保无并发访问、无并发回调；OSAL 不做隐式清理。
+- 回调合同为“严格非阻塞”：禁止在回调中执行阻塞等待与长耗时逻辑。
+- `start/stop/reset/delete` 在命令未入队时，返回码按等待语义映射：
+  `timeout=0 -> OSAL_WOULD_BLOCK`；
+  `timeout>0 或 WAIT_FOREVER -> OSAL_TIMEOUT`。
 
 ------
 

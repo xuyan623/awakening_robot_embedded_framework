@@ -10,14 +10,16 @@
 - 对外仅暴露 `awlf/lib/include/sync/` 下的公共 API。
 
 ### sync 不做什么
-- 不提供“通信语义”（消息、发布订阅、序列化、路由等），这些属于 `services/ipc` 的职责范畴。
+- 不提供“通信语义”（消息、发布订阅、序列化、路由等），这些属于 `services/comm` 的职责范畴。
 - 不直接依赖 `drivers/`、`bsp/` 的业务实现（避免层次倒置与循环依赖）。
 - 不在公共头文件中引入任何 RTOS 私有头或类型（例如 FreeRTOS）。
 
-### 与 OSAL / IPC 的关系（简述）
+### 与 OSAL / Comm 的关系（简述）
 - **OSAL**：抽象操作系统原语（线程、信号量、队列、事件、时间等）。
 - **sync**：在 OSAL 之上提供框架所需的同步语义构件（例如 one-shot completion）。
-- **services/ipc**：提供通信语义的服务层，可依赖 sync/OSAL，但 sync 不应反向依赖 services/ipc。
+- **services/comm**：提供通信语义的服务层，可依赖 sync/OSAL；comm adapter 位于实现端并依赖 comm 抽象完成接入。
+
+> 分层总依赖矩阵以 `awlf/document/architecture/分层与依赖规范.md` 为准，本文件仅描述 sync 专项边界。
 
 ## 依赖隔离（硬约束）
 
