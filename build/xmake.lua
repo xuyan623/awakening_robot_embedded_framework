@@ -15,10 +15,10 @@ includes("../platform/sync")
 includes("../platform/bsp")
 
 --- @target tar_awlf
---- @brief AWLF 聚合静态库
---- @details 汇总核心、算法、驱动、系统、BSP、OSAL 与同步模块。
+--- @brief AWLF 聚合目标
+--- @details 仅做依赖聚合与传播，不直接产出静态库。
 target("tar_awlf")
-    set_kind("static")
+    set_kind("phony")
     add_deps("tar_awcore", {public = true})
     add_deps("tar_awalgo", {public = true})
     add_deps("tar_awdrivers", {public = true})
@@ -26,10 +26,4 @@ target("tar_awlf")
     add_deps("tar_bsp", {public = true})
     add_deps("tar_osal", {public = true})
     add_deps("tar_sync", {public = true})
-    -- 构建完成后输出 AWLF 信息
-    ---@param target target 目标对象
-    after_build(function(target)
-        import("awlf")
-        awlf.awlf_print_info()
-    end)
 target_end()

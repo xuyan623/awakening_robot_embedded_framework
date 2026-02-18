@@ -1,4 +1,4 @@
-﻿#include "sync/completion.h"
+#include "sync/completion.h"
 
 #include "core/aw_config.h"
 #include "osal/osal_core.h"
@@ -68,58 +68,58 @@ static AwlfRet_e completion_sem_wait_one_shot(Completion_t completion, size_t ti
 {
     if (!completion || !completion->sem)
         return AWLF_ERROR_PARAM;
-    if (osal_in_isr())
+    if (osal_is_in_isr())
         return AWLF_ERROR_PARAM;
 
     osal_thread_t self = osal_thread_self();
     if (!self)
         return AWLF_ERROR;
 
-    uint32_t irq_state = osal_irq_save();
+    osal_irq_lock_task();
     if (completion->status == COMP_WAIT)
     {
-        osal_irq_restore(irq_state);
+        osal_irq_unlock_task();
         return AWLF_ERROR_BUSY;
     }
     if (completion->status == COMP_DONE)
     {
         completion->status = COMP_INIT;
         completion->wait_thread = NULL;
-        osal_irq_restore(irq_state);
+        osal_irq_unlock_task();
         completion_sem_drain(completion->sem);
         return AWLF_OK;
     }
     if (timeout_ms == 0U)
     {
-        osal_irq_restore(irq_state);
+        osal_irq_unlock_task();
         return AWLF_ERROR_TIMEOUT;
     }
     if (completion->wait_thread != NULL)
     {
-        osal_irq_restore(irq_state);
+        osal_irq_unlock_task();
         return AWLF_ERROR_BUSY;
     }
 
     completion->wait_thread = self;
     completion->status = COMP_WAIT;
-    osal_irq_restore(irq_state);
+    osal_irq_unlock_task();
 
     uint32_t osal_timeout_ms = completion_timeout_to_osal_ms(timeout_ms);
     int wait_result = osal_sem_wait(completion->sem, osal_timeout_ms);
     AwlfRet_e ret = (wait_result == OSAL_OK) ? AWLF_OK : AWLF_ERROR_TIMEOUT;
 
-    irq_state = osal_irq_save();
+    osal_irq_lock_task();
     if (ret != AWLF_OK && completion->status != COMP_DONE)
     {
         completion->wait_thread = NULL;
         completion->status = COMP_INIT;
-        osal_irq_restore(irq_state);
+        osal_irq_unlock_task();
         return AWLF_ERROR_TIMEOUT;
     }
 
     completion->wait_thread = NULL;
     completion->status = COMP_INIT;
-    osal_irq_restore(irq_state);
+    osal_irq_unlock_task();
     completion_sem_drain(completion->sem);
     return AWLF_OK;
 }
@@ -129,15 +129,21 @@ static AwlfRet_e completion_sem_done_one_shot(Completion_t completion)
     if (!completion || !completion->sem)
         return AWLF_ERROR_PARAM;
 
-    uint32_t irq_state = osal_irq_save();
+    int in_isr = osal_is_in_isr();
+    osal_irq_isr_state_t isr_state = 0u;
     AwlfRet_e ret;
+
+    if (in_isr)
+        isr_state = osal_irq_lock_from_isr();
+    else
+        osal_irq_lock_task();
 
     switch (completion->status)
     {
     case COMP_INIT:
         completion->status = COMP_DONE;
-        if (osal_in_isr())
-            (void)osal_sem_post_isr(completion->sem);
+        if (osal_is_in_isr())
+            (void)osal_sem_post_from_isr(completion->sem);
         else
             (void)osal_sem_post(completion->sem);
         ret = AWLF_OK;
@@ -146,8 +152,8 @@ static AwlfRet_e completion_sem_done_one_shot(Completion_t completion)
     case COMP_WAIT:
         if (completion->wait_thread != NULL)
         {
-            if (osal_in_isr())
-                (void)osal_sem_post_isr(completion->sem);
+            if (osal_is_in_isr())
+                (void)osal_sem_post_from_isr(completion->sem);
             else
                 (void)osal_sem_post(completion->sem);
             completion->wait_thread = NULL;
@@ -169,7 +175,10 @@ static AwlfRet_e completion_sem_done_one_shot(Completion_t completion)
         break;
     }
 
-    osal_irq_restore(irq_state);
+    if (in_isr)
+        osal_irq_unlock_from_isr(isr_state);
+    else
+        osal_irq_unlock_task();
     return ret;
 }
 

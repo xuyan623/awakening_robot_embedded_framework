@@ -72,7 +72,7 @@ int main(void)
     osal_thread_t task1 = NULL;
     osal_thread_attr_t attr = {0};
     attr.name = "SerialTestTask";
-    attr.stack_size = 5120;
+    attr.stack_size = 5120u * OSAL_STACK_WORD_BYTES;
     attr.priority = 4;
     int result1 = osal_thread_create(&task1, &attr, serial_test_task, NULL);
     while (result1 != OSAL_OK)

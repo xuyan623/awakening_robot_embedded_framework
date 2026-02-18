@@ -11,6 +11,9 @@ rule("awlf.board_assets")
     --- 配置阶段注入板级构建资源
     ---@param target target 目标对象
     on_config(function(target)
+        if target:kind() ~= "binary" then
+            return
+        end
         -- 读取板级构建资源
         local awlf = import("awlf", {rootdir = modules_root})
         local context = awlf.get_context()
@@ -19,6 +22,14 @@ rule("awlf.board_assets")
         local assets = bsp.get_board_build_assets(context.board_name, context.toolchain_name)
         if assets.startup then
             target:add("files", assets.startup)
+        end
+        local override_sources = bsp.get_board_override_sources(context.board_name)
+        if override_sources and #override_sources > 0 then
+            local inputs = bsp.get_board_build_inputs(context.board_name)
+            target:add("files", override_sources, {
+                includedirs = inputs.includedirs,
+                defines = inputs.defines,
+            })
         end
         if assets.linkerscript then
             local config = import("core.project.config")

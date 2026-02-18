@@ -5,7 +5,7 @@
 #define OSAL_PORT_FREERTOS 1
 #define OSAL_PORT_POSIX 2
 
-/* 用户可在编译选项中定义 AWLF_OSAL_PORT 来切换端口，通常由 buildspec/profile 统一注入编译选项 */
+/* 用户可在编译选项中定义 AWLF_OSAL_PORT 来切换端口，通常由 构建系统 profile 统一注入编译选项 */
 #ifndef AWLF_OSAL_PORT
 #define AWLF_OSAL_PORT OSAL_PORT_FREERTOS
 #endif

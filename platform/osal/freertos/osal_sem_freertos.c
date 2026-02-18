@@ -4,50 +4,122 @@
 #include "osal_time_freertos.h"
 #include "semphr.h"
 
-int osal_sem_create(osal_sem_t* sem, uint32_t max_count, uint32_t init_count)
+static int osal_sem_check_task_context(void)
 {
-    if (!sem || init_count > max_count)
-        return OSAL_ERR_PARAM;
-    *sem = (osal_sem_t)xSemaphoreCreateCounting((UBaseType_t)max_count, (UBaseType_t)init_count);
-    return (*sem) ? OSAL_OK : OSAL_ERR_NOMEM;
+    int in_isr = osal_is_in_isr();
+    OSAL_ASSERT(in_isr == 0);
+    return (in_isr == 0);
 }
 
-int osal_sem_delete(osal_sem_t sem)
+static int osal_sem_check_isr_context(void)
+{
+    int in_isr = osal_is_in_isr();
+    OSAL_ASSERT(in_isr != 0);
+    return (in_isr != 0);
+}
+
+static int osal_sem_u32_to_ubase(uint32_t value, UBaseType_t* out_value)
+{
+    if (!out_value)
+        return 0;
+    if ((uint32_t)((UBaseType_t)value) != value)
+        return 0;
+
+    *out_value = (UBaseType_t)value;
+    return 1;
+}
+
+osal_status_t osal_sem_create(osal_sem_t* sem, uint32_t max_count, uint32_t init_count)
+{
+    UBaseType_t max_count_u = 0u;
+    UBaseType_t init_count_u = 0u;
+    SemaphoreHandle_t handle = NULL;
+
+    if (!sem || max_count == 0u || init_count > max_count)
+        return OSAL_INVALID;
+    if (!osal_sem_check_task_context())
+        return OSAL_INVALID;
+    if (!osal_sem_u32_to_ubase(max_count, &max_count_u))
+        return OSAL_INVALID;
+    if (!osal_sem_u32_to_ubase(init_count, &init_count_u))
+        return OSAL_INVALID;
+
+    *sem = NULL;
+    handle = xSemaphoreCreateCounting(max_count_u, init_count_u);
+    if (!handle)
+        return OSAL_NO_RESOURCE;
+
+    *sem = (osal_sem_t)handle;
+    return OSAL_OK;
+}
+
+osal_status_t osal_sem_delete(osal_sem_t sem)
 {
     if (!sem)
-        return OSAL_ERR_PARAM;
+        return OSAL_INVALID;
+    if (!osal_sem_check_task_context())
+        return OSAL_INVALID;
+
     vSemaphoreDelete((SemaphoreHandle_t)sem);
     return OSAL_OK;
 }
 
-int osal_sem_wait(osal_sem_t sem, uint32_t timeout_ms)
+osal_status_t osal_sem_wait(osal_sem_t sem, uint32_t timeout_ms)
 {
     if (!sem)
-        return OSAL_ERR_PARAM;
-    if (osal_in_isr())
-        return OSAL_ERR_CTX;
+        return OSAL_INVALID;
+    if (!osal_sem_check_task_context())
+        return OSAL_INVALID;
+
     OSAL_ASSERT_IN_TASK();
     TickType_t ticks = osal_ms_to_ticks(timeout_ms);
-    return (xSemaphoreTake((SemaphoreHandle_t)sem, ticks) == pdPASS) ? OSAL_OK : OSAL_ERR_TIMEOUT;
+    BaseType_t ok = xSemaphoreTake((SemaphoreHandle_t)sem, ticks);
+    return osal_wait_result_to_status(ok, timeout_ms);
 }
 
-int osal_sem_post(osal_sem_t sem)
+osal_status_t osal_sem_post(osal_sem_t sem)
 {
     if (!sem)
-        return OSAL_ERR_PARAM;
-    if (osal_in_isr())
-        return OSAL_ERR_CTX;
+        return OSAL_INVALID;
+    if (!osal_sem_check_task_context())
+        return OSAL_INVALID;
+
     OSAL_ASSERT_IN_TASK();
-    return (xSemaphoreGive((SemaphoreHandle_t)sem) == pdPASS) ? OSAL_OK : OSAL_ERR;
+    return (xSemaphoreGive((SemaphoreHandle_t)sem) == pdPASS) ? OSAL_OK : OSAL_NO_RESOURCE;
 }
 
-int osal_sem_post_isr(osal_sem_t sem)
+osal_status_t osal_sem_post_from_isr(osal_sem_t sem)
 {
     if (!sem)
-        return OSAL_ERR_PARAM;
+        return OSAL_INVALID;
+    if (!osal_sem_check_isr_context())
+        return OSAL_INVALID;
+
     BaseType_t need_switch = pdFALSE;
     BaseType_t ok = xSemaphoreGiveFromISR((SemaphoreHandle_t)sem, &need_switch);
     if (need_switch)
         portYIELD_FROM_ISR(need_switch);
-    return (ok == pdPASS) ? OSAL_OK : OSAL_ERR;
+    return (ok == pdPASS) ? OSAL_OK : OSAL_NO_RESOURCE;
+}
+
+osal_status_t osal_sem_get_count(osal_sem_t sem, uint32_t* out_count)
+{
+    if (!sem || !out_count)
+        return OSAL_INVALID;
+    if (!osal_sem_check_task_context())
+        return OSAL_INVALID;
+
+    *out_count = (uint32_t)uxSemaphoreGetCount((SemaphoreHandle_t)sem);
+    return OSAL_OK;
+}
+
+osal_status_t osal_sem_get_count_from_isr(osal_sem_t sem, uint32_t* out_count)
+{
+    if (!sem || !out_count)
+        return OSAL_INVALID;
+    if (!osal_sem_check_isr_context())
+        return OSAL_INVALID;
+
+    *out_count = (uint32_t)uxSemaphoreGetCountFromISR((SemaphoreHandle_t)sem);
+    return OSAL_OK;
 }

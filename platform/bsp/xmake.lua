@@ -2,24 +2,34 @@
 --- @brief BSP 构建路由脚本
 --- @details 负责加载板级模块并汇总 BSP 目标依赖。
 
---- 解析板级脚本目录
----@param board_name string 板级名称
----@return string|nil board_dir 板级目录
-local function resolve_board_dir(board_name)
-    local internal_dir = path.join("boards", board_name)
-    if os.isdir(internal_dir) then
-        return internal_dir
+includes(path.join(os.scriptdir(), "data", "boards", "index.lua"))
+
+--- 判断列表是否包含指定值
+---@param values table|nil 值列表
+---@param value any 目标值
+---@return boolean found 是否命中
+local function list_contains(values, value)
+    for _, item in ipairs(values or {}) do
+        if item == value then
+            return true
+        end
     end
-    return nil
+    return false
 end
 
+--- 获取板级名称列表（静态索引）
+---@return string[] names 板级名称列表
+local function list_board_names()
+    return awlf_board_index or {}
+end
+
+local board_values = list_board_names()
 local board_name = get_config("board")
 if board_name and board_name ~= "" then
-    local board_dir = resolve_board_dir(board_name)
-    if not board_dir then
-        raise("board dir not found: " .. board_name)
+    if not list_contains(board_values, board_name) then
+        raise("board not found: " .. board_name)
     end
-    includes(board_dir)
+    includes(path.join("boards", board_name))
 end
 
 --- @target tar_bsp

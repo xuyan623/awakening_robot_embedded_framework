@@ -871,7 +871,7 @@
   - `osal_thread_sleep_ms`
   - `osal_thread_yield`
   - `osal_thread_exit`
-  - `osal_thread_delete`
+  - `osal_thread_terminate`
   - `osal_kernel_start`
 - 内部函数
   - 无

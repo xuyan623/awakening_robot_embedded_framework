@@ -25,7 +25,7 @@ typedef struct
 static osal_queue_t g_queue;
 static osal_mutex_t g_mutex;
 static osal_sem_t g_sem;
-static osal_event_t g_event;
+static osal_event_flags_t g_event;
 static osal_thread_t g_thread_prod;
 static osal_thread_t g_thread_cons;
 static osal_thread_t g_thread_mon;
@@ -54,13 +54,13 @@ static void _producer_thread(void* arg)
 {
     (void)arg;
     osal_test_msg_t msg;
-    uint32_t last_ms = osal_time_ms();
+    osal_time_ms_t last_ms = osal_time_now_monotonic();
 
     while (1)
     {
         /* 生成数据 */
         msg.seq = g_produced_cnt++;
-        msg.time_ms = osal_time_ms();
+        msg.time_ms = (uint32_t)osal_time_now_monotonic();
 
         /* 保护共享计数器 */
         if (osal_mutex_lock(g_mutex, OSAL_WAIT_FOREVER) == OSAL_OK)
@@ -73,10 +73,10 @@ static void _producer_thread(void* arg)
         (void)osal_queue_send(g_queue, &msg, 5U);
 
         /* 通知消费者线程（事件对象化，避免线程通知位冲突） */
-        (void)osal_event_set(g_event, 0x01U);
+        (void)osal_event_flags_set(g_event, 0x01U);
 
         /* 固定周期运行 */
-        osal_delay_until_ms(&last_ms, TEST_PROD_PERIOD);
+        (void)osal_delay_until(&last_ms, TEST_PROD_PERIOD, NULL);
     }
 }
 
@@ -89,7 +89,7 @@ static void _consumer_thread(void* arg)
     {
         uint32_t value = 0;
         /* 等待事件通知 */
-        if (osal_event_wait(g_event, 0x01U, &value, OSAL_WAIT_FOREVER, 0U) == OSAL_OK)
+        if (osal_event_flags_wait(g_event, 0x01U, &value, OSAL_WAIT_FOREVER, 0U) == OSAL_OK)
         {
             /* 收到事件后尝试取队列数据 */
             if (osal_queue_recv(g_queue, &msg, 10U) == OSAL_OK)
@@ -126,7 +126,7 @@ static void _counter_thread(void* arg)
             (void)osal_mutex_unlock(g_mutex);
         }
         /* 让出CPU，避免独占 */
-        osal_thread_sleep_ms(1U);
+        osal_sleep_ms(1U);
     }
 }
 
@@ -142,15 +142,15 @@ static void _edge_thread(void* arg)
         uint8_t item = 0x5A;
 
         tests++;
-        if (osal_queue_create(NULL, 1U, 1U) != OSAL_ERR_PARAM)
+        if (osal_queue_create(NULL, 1U, 1U) != OSAL_INVALID)
             failures++;
 
         tests++;
-        if (osal_queue_create(&q, 0U, 1U) != OSAL_ERR_PARAM)
+        if (osal_queue_create(&q, 0U, 1U) != OSAL_INVALID)
             failures++;
 
         tests++;
-        if (osal_queue_create(&q, 1U, 0U) != OSAL_ERR_PARAM)
+        if (osal_queue_create(&q, 1U, 0U) != OSAL_INVALID)
             failures++;
 
         tests++;
@@ -158,11 +158,11 @@ static void _edge_thread(void* arg)
             failures++;
 
         tests++;
-        if (osal_queue_recv(q, &item, 0U) != OSAL_ERR_TIMEOUT)
+        if (osal_queue_recv(q, &item, 0U) != OSAL_WOULD_BLOCK)
             failures++;
 
         tests++;
-        if (osal_queue_send(q, NULL, 0U) != OSAL_ERR_PARAM)
+        if (osal_queue_send(q, NULL, 0U) != OSAL_INVALID)
             failures++;
 
         tests++;
@@ -170,7 +170,7 @@ static void _edge_thread(void* arg)
             failures++;
 
         tests++;
-        if (osal_queue_send(q, &item, 0U) != OSAL_ERR_TIMEOUT)
+        if (osal_queue_send(q, &item, 0U) != OSAL_WOULD_BLOCK)
             failures++;
 
         tests++;
@@ -178,7 +178,7 @@ static void _edge_thread(void* arg)
             failures++;
 
         tests++;
-        if (osal_queue_delete(NULL) != OSAL_ERR_PARAM)
+        if (osal_queue_delete(NULL) != OSAL_INVALID)
             failures++;
 
         tests++;
@@ -189,9 +189,10 @@ static void _edge_thread(void* arg)
     /* 信号量边界测试 */
     {
         osal_sem_t s = NULL;
+        uint32_t sem_count = 0u;
 
         tests++;
-        if (osal_sem_create(&s, 1U, 2U) != OSAL_ERR_PARAM)
+        if (osal_sem_create(&s, 1U, 2U) != OSAL_INVALID)
             failures++;
 
         tests++;
@@ -199,7 +200,11 @@ static void _edge_thread(void* arg)
             failures++;
 
         tests++;
-        if (osal_sem_wait(s, 0U) != OSAL_ERR_TIMEOUT)
+        if (osal_sem_get_count(s, &sem_count) != OSAL_OK || sem_count != 0u)
+            failures++;
+
+        tests++;
+        if (osal_sem_wait(s, 0U) != OSAL_WOULD_BLOCK)
             failures++;
 
         tests++;
@@ -207,11 +212,23 @@ static void _edge_thread(void* arg)
             failures++;
 
         tests++;
+        if (osal_sem_get_count(s, &sem_count) != OSAL_OK || sem_count != 1u)
+            failures++;
+
+        tests++;
+        if (osal_sem_post(s) != OSAL_NO_RESOURCE)
+            failures++;
+
+        tests++;
         if (osal_sem_wait(s, 0U) != OSAL_OK)
             failures++;
 
         tests++;
-        if (osal_sem_delete(NULL) != OSAL_ERR_PARAM)
+        if (osal_sem_get_count(s, &sem_count) != OSAL_OK || sem_count != 0u)
+            failures++;
+
+        tests++;
+        if (osal_sem_delete(NULL) != OSAL_INVALID)
             failures++;
 
         tests++;
@@ -228,11 +245,15 @@ static void _edge_thread(void* arg)
             failures++;
 
         tests++;
+        if (osal_mutex_unlock(m) != OSAL_INVALID)
+            failures++;
+
+        tests++;
         if (osal_mutex_lock(m, OSAL_WAIT_FOREVER) != OSAL_OK)
             failures++;
 
         tests++;
-        if (osal_mutex_lock(m, 0U) != OSAL_ERR_TIMEOUT)
+        if (osal_mutex_lock(m, 0U) != OSAL_WOULD_BLOCK)
             failures++;
 
         tests++;
@@ -240,7 +261,7 @@ static void _edge_thread(void* arg)
             failures++;
 
         tests++;
-        if (osal_mutex_delete(NULL) != OSAL_ERR_PARAM)
+        if (osal_mutex_delete(NULL) != OSAL_INVALID)
             failures++;
 
         tests++;
@@ -251,17 +272,17 @@ static void _edge_thread(void* arg)
     /* 事件边界测试 */
     {
         uint32_t value = 0;
-        osal_event_t event = NULL;
+        osal_event_flags_t event = NULL;
 
         tests++;
-        if (osal_event_create(&event) != OSAL_OK)
+        if (osal_event_flags_create(&event) != OSAL_OK)
             failures++;
 
         tests++;
-        if (osal_event_wait(event, 0x02U, &value, 0U, 0U) != OSAL_ERR_TIMEOUT)
+        if (osal_event_flags_wait(event, 0x02U, &value, 0U, 0U) != OSAL_WOULD_BLOCK)
             failures++;
 
-        (void)osal_event_delete(event);
+        (void)osal_event_flags_delete(event);
     }
 
     /* 定时器边界测试 */
@@ -277,14 +298,10 @@ static void _edge_thread(void* arg)
 
     /* 时间接口边界测试 */
     {
-        uint64_t ms = osal_time_ms64();
-        uint64_t us = osal_time_us64();
-        uint64_t ns = osal_time_ns64();
+        osal_time_ms_t ms = osal_time_now_monotonic();
+        osal_time_ms_t ms_next = osal_time_now_monotonic();
         tests++;
-        if (us < (ms * OSAL_US_PER_MS))
-            failures++;
-        tests++;
-        if (ns < (ms * OSAL_NS_PER_MS))
+        if (osal_time_before(ms_next, ms))
             failures++;
     }
 
@@ -294,14 +311,14 @@ static void _edge_thread(void* arg)
 
     while (1)
     {
-        osal_thread_sleep_ms(1000U);
+        osal_sleep_ms(1000U);
     }
 }
 
 int main(void)
 {
     /* 创建事件对象 */
-    if (osal_event_create(&g_event) != OSAL_OK)
+    if (osal_event_flags_create(&g_event) != OSAL_OK)
         return -1;
 
     /* 创建队列 */
@@ -317,11 +334,11 @@ int main(void)
         return -1;
 
     /* 创建线程 */
-    osal_thread_attr_t attr_prod = {"osal_prod", 512U, 2U};
-    osal_thread_attr_t attr_cons = {"osal_cons", 512U, 2U};
-    osal_thread_attr_t attr_mon = {"osal_mon", 512U, 1U};
-    osal_thread_attr_t attr_cnt = {"osal_cnt", 512U, 1U};
-    osal_thread_attr_t attr_edge = {"osal_edge", 768U, 2U};
+    osal_thread_attr_t attr_prod = {"osal_prod", 512U * OSAL_STACK_WORD_BYTES, 2U};
+    osal_thread_attr_t attr_cons = {"osal_cons", 512U * OSAL_STACK_WORD_BYTES, 2U};
+    osal_thread_attr_t attr_mon = {"osal_mon", 512U * OSAL_STACK_WORD_BYTES, 1U};
+    osal_thread_attr_t attr_cnt = {"osal_cnt", 512U * OSAL_STACK_WORD_BYTES, 1U};
+    osal_thread_attr_t attr_edge = {"osal_edge", 768U * OSAL_STACK_WORD_BYTES, 2U};
 
     if (osal_thread_create(&g_thread_prod, &attr_prod, _producer_thread, NULL) != OSAL_OK)
         return -1;
