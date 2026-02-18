@@ -35,6 +35,13 @@ function get_board_build_inputs(board_name)
     return inputs.get_board_build_inputs(board_name)
 end
 
+--- 获取板级强覆盖源文件（直接并入 binary）
+---@param board_name string 板级名称
+---@return string[] sources 覆盖源文件
+function get_board_override_sources(board_name)
+    return inputs.get_board_override_sources(board_name)
+end
+
 --- 更新板级 OS 配置上下文
 ---@param awlf table awlf 模块
 ---@param board_name string 板级名称
@@ -57,6 +64,7 @@ return {
     resolve_arch = resolve_arch,
     get_arch_traits = get_arch_traits,
     get_board_build_inputs = get_board_build_inputs,
+    get_board_override_sources = get_board_override_sources,
     update_board_os_context = update_board_os_context,
     get_board_build_assets = get_board_build_assets,
 }

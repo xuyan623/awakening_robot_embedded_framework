@@ -275,11 +275,71 @@ function awlf_print_info()
     print_field("os", context.os_name)
 end
 
+--- 解析构建模式（优先使用 target 官方接口）
+---@param target target|nil 目标对象
+---@return string mode 构建模式
+local function resolve_build_mode(target)
+    if target and type(target.is_mode) == "function" then
+        if target:is_mode("debug") then
+            return "debug"
+        end
+        if target:is_mode("release") then
+            return "release"
+        end
+    end
+    local config = import("core.project.config")
+    local mode = config.get("mode")
+    if type(mode) == "string" and mode ~= "" then
+        return mode
+    end
+    return "unknown"
+end
+
+--- 归一化内存分布行
+---@param name string 区域名
+---@param used integer|nil 已用字节
+---@param total integer|nil 总字节
+---@return string line 输出行
+local function format_memory_distribution_line(name, used, total)
+    if type(used) ~= "number" then
+        return string.format("[awlf]   %-5s: unknown", name)
+    end
+    if type(total) == "number" and total > 0 then
+        local percent = (used * 100.0) / total
+        local percent_text = string.format("%.2f", percent) .. "%%"
+        return string.format("[awlf]   %-5s: %d / %d (%s)", name, used, total, percent_text)
+    end
+    return string.format("[awlf]   %-5s: %d / unknown", name, used)
+end
+
+--- 输出构建摘要（构建模式与内存分布）
+---@param target target|nil 目标对象
+---@return nil
+function awlf_print_build_profile(target)
+    local build_mode = resolve_build_mode(target)
+    print("[awlf] build mode: " .. build_mode)
+    local modules_root = os.scriptdir()
+    local toolchain_lib = import("awlf_toolchain_lib", {rootdir = modules_root})
+    local report = toolchain_lib.build_memory_distribution_report(target, get_context())
+    print("[awlf] memory distribution:")
+    if not report or report.available == false then
+        local reason = report and report.reason or "unknown"
+        print("[awlf]   unavailable: " .. tostring(reason))
+        return
+    end
+    print(format_memory_distribution_line("FLASH", report.flash_used, report.flash_total))
+    print(format_memory_distribution_line("RAM", report.ram_used, report.ram_total))
+    if report.reason and report.reason ~= "" then
+        print("[awlf]   note: " .. report.reason)
+    end
+end
+
 return {
     get_preset_root = get_preset_root,
     get_preset = get_preset,
     set_context_extra = set_context_extra,
     get_context = get_context,
     awlf_print_info = awlf_print_info,
+    awlf_print_build_profile = awlf_print_build_profile,
     sync_context_from_config = sync_context_from_config,
 }

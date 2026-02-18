@@ -141,11 +141,11 @@ static size_t _serial_rx_block(Device_t dev, void* buf, size_t len)
     rd_from_rb += ringbuf_out(&rxFifo->rb, buf, rd_len);
     do
     {
-        uint32_t irq_state = osal_irq_save();
+        osal_irq_lock_task();
         rxFifo->loadSize = (rd_remain > ringbuf_avail(&rxFifo->rb)) ? ringbuf_avail(&rxFifo->rb) : rd_remain;
         rd_len = rxFifo->loadSize;
         rxFifo->status = SERIAL_FIFO_BUSY; // FIFO开始等待数据
-        osal_irq_restore(irq_state);
+        osal_irq_unlock_task();
         completion_wait(&rxFifo->cpt, AWLF_WAIT_FOREVER); // 等待数据到来
         rxFifo->status = SERIAL_FIFO_IDLE;                // FIFO结束数据等待
 
@@ -155,12 +155,12 @@ static size_t _serial_rx_block(Device_t dev, void* buf, size_t len)
 
         if (rxFifo->loadSize < 0) // loadSize < 0 说明出现了FIFO溢出错误
         {
-            uint32_t irq_state2 = osal_irq_save();
+            osal_irq_lock_task();
             // 负负得正，实际上是算上了溢出的数据长度(框架层不关心应用层是否处理溢出，只是诚实地记录硬件实际接收过的字节数)
             rd_len -= rxFifo->loadSize;
             // 至于溢出的数据怎么办？那是API使用者要考虑的事情，要不把rb开大一点，要不就在错误回调中做特殊处理
             rxFifo->loadSize = 0;
-            osal_irq_restore(irq_state2);
+            osal_irq_unlock_task();
         }
         /*
             loadSize包含rxfifo溢出的信息，没法确定究竟溢出了多少，因此rd_len可能会大于rd_remain
@@ -415,7 +415,7 @@ static size_t serial_write(Device_t dev, void* pos, void* data, size_t len)
     }
     else
     {
-        if ((oparams & SERIAL_O_NBLCK_TX) || osal_in_isr()) // 在中断中只能使用非阻塞发送
+        if ((oparams & SERIAL_O_NBLCK_TX) || osal_is_in_isr()) // 在中断中只能使用非阻塞发送
             ret_len = _serial_tx_nonblock(dev, data, len);
         else if (oparams & SERIAL_O_BLCK_TX)
             ret_len = _serial_tx_block(dev, data, len);
@@ -443,7 +443,7 @@ static size_t serial_read(Device_t dev, void* pos, void* buf, size_t len)
 
     if (ringbuf_len(&rxFifo->rb) >= len)
         recv_len = ringbuf_out(&rxFifo->rb, buf, len);
-    else if (SERIAL_IS_O_NBLCK_RX(dev) || osal_in_isr()) // 在中断中只能使用非阻塞接收
+    else if (SERIAL_IS_O_NBLCK_RX(dev) || osal_is_in_isr()) // 在中断中只能使用非阻塞接收
         recv_len = _serial_rx_nonblock(dev, buf, len);
     else if (SERIAL_IS_O_BLCK_RX(dev))
         recv_len = _serial_rx_block(dev, buf, len);

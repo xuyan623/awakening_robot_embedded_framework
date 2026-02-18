@@ -1,15 +1,16 @@
-/*
- * @Description: CAN婵☆垪鈧櫕鍋ラ悗鍦仧楠炲洭寮崶锔筋偨
+﻿/*
+ * @Description: CAN BSP 适配实现（对接 STM32 HAL CAN 外设）
  * @date 2025-11-10
- * @author 濞达絾鐟﹂弮?
+ * @author Bamboo
  */
 #include "bsp_can.h"
 #include <string.h>
 
-// 濞寸姰鍎扮粭鍛偘鐏炵偓鏆堥梺鎻掞功濞堟垶鎷呭鍛殢闁?閻?clang-format
-// off"闁?clang-format
-// on"濞戞柨顑夊Λ鍧楁儍閸曨亜鏁╅柣顔荤閸櫻囨⒒椤撶喓澹愮€殿喖绻愮€?
-// clang-format off
+#define BSP_CAN_FILTER_SPLIT_BANK      (14U)
+#define BSP_CAN_MAX_FILTER_BANK_COUNT  (28U)
+
+// 保持映射表按枚举顺序排列，便于人工核对。
+// clang-format off（避免数组紧凑排版被打散）
 static uint32_t gBs1Table[CAN_TSEG1_MAX] =
 {
     CAN_BS1_1TQ, CAN_BS1_2TQ, CAN_BS1_3TQ,
@@ -71,22 +72,22 @@ static uint32_t bsp_can_sjw_trans(CanSjw_e sjw)
     return ret;
 }
 
-static AwlfRet_e bsp_can_set_filter(CAN_HandleTypeDef* hcan, CanFilterCfg_t cfg)
+static AwlfRet_e bsp_can_set_filter(CAN_HandleTypeDef* hcan, CanHwFilterCfg_t cfg)
 {
     CAN_FilterTypeDef FilterConfig;
     FilterConfig.FilterBank = cfg->bank;
     FilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
     FilterConfig.FilterActivation = ENABLE;
     FilterConfig.FilterFIFOAssignment = (cfg->bank % 2 == 0) ? CAN_FILTER_FIFO0 : CAN_FILTER_FIFO1;
-    // STM32F4闁汇劌鍤婣N濞戞捁妗ㄧ€靛本绂掑顥缂備焦鎸婚悗顖炴晬鐎涘N1濞戞捁妗ㄧ€靛瓔AN闁挎稑鐡擜N2濞戞捁妗ㄧ划鐕橝N闁挎稑鑻崣锟犳偨?缂?8濞戞搩浜濋幎銈呪枖閵忕姵鐝ら柨娑樻湰濠€鐗堛仚閸楃偛袟缂佸顑呯花顓㈡焻婢跺顏ラ悗鐢垫嚀瀹曟劙宕?
-    FilterConfig.SlaveStartFilterBank = 14;
-    // 闂佹澘绉堕悿鍡楊煥閵堝棗鐨鹃柛锝冨妼瀵剟寮?
+    // STM32F4 双 CAN 共享过滤器 bank，分界由 SlaveStartFilterBank 决定。
+    FilterConfig.SlaveStartFilterBank = BSP_CAN_FILTER_SPLIT_BANK;
+    // MASK 模式：id/mask 共同决定匹配窗口。
     if (cfg->workMode == CAN_FILTER_MODE_MASK)
     {
         uint32_t id;
         uint32_t mask;
         FilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
-        if (cfg->idType == CAN_FILTER_ID_STD) // 濞寸姴鎳忛悥锝夊礄閸℃濮?
+        if (cfg->idType == CAN_FILTER_ID_STD) // 仅标准 ID
         {
             id = cfg->id << 5;
             mask = cfg->mask << 5;
@@ -105,12 +106,12 @@ static AwlfRet_e bsp_can_set_filter(CAN_HandleTypeDef* hcan, CanFilterCfg_t cfg)
             FilterConfig.FilterMaskIdHigh = (mask >> 16) & 0xffff;
             FilterConfig.FilterMaskIdLow = (mask & 0xffff);
 
-            if (cfg->idType == CAN_FILTER_ID_EXT) // 濞寸姴鎳忕€氬洨浠﹂弴鐐村
+            if (cfg->idType == CAN_FILTER_ID_EXT) // 仅扩展 ID
             {
                 FilterConfig.FilterIdLow |= CAN_ID_EXT;
                 FilterConfig.FilterMaskIdLow |= CAN_ID_EXT;
             }
-            else // 闁哄秴娲ら崳顖滄暜?+ 闁归攱鎸搁惈宥囨暜?
+            else // 标准 + 扩展混合模式
             {
                 FilterConfig.FilterIdLow = (id & 0xffff);
                 FilterConfig.FilterMaskIdLow &= ~CAN_ID_EXT;
@@ -139,7 +140,21 @@ static AwlfRet_e bsp_can_set_filter(CAN_HandleTypeDef* hcan, CanFilterCfg_t cfg)
     return AWLF_OK;
 }
 
-// 婵炲鍨绘竟鎺楁偝閸ヮ剙甯崇紓鍐惧枦閵嗗啴鏁嶇€涘N闁哄啫鐖奸幐?2MHz闁挎稑濂旂粭澶愬触鐏炵厧鐦滃Λ鐗堝灴濞撳墎鎲版担閿嬪弿闁衡偓绾拋鍤夐悶?
+static AwlfRet_e bsp_can_clear_filter(CAN_HandleTypeDef* hcan, size_t bank)
+{
+    CAN_FilterTypeDef FilterConfig = {0};
+    FilterConfig.FilterBank = bank;
+    FilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
+    FilterConfig.FilterActivation = DISABLE;
+    FilterConfig.FilterFIFOAssignment = (bank % 2 == 0) ? CAN_FILTER_FIFO0 : CAN_FILTER_FIFO1;
+    FilterConfig.SlaveStartFilterBank = BSP_CAN_FILTER_SPLIT_BANK;
+    FilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
+    if (HAL_CAN_ConfigFilter(hcan, &FilterConfig) != HAL_OK)
+        return AWLF_ERROR;
+    return AWLF_OK;
+}
+
+// 常用波特率预设参数（假设 CAN 内核时钟为 42MHz）。
 static CanTimeCfg_s BspCanBitTimeTable[] = {
     {CAN_BAUD_10K, 300, {CAN_TSEG1_9TQ, CAN_TSEG2_4TQ, CAN_SYNCJW_2TQ}},
     {CAN_BAUD_20K, 150, {CAN_TSEG1_9TQ, CAN_TSEG2_4TQ, CAN_SYNCJW_2TQ}},
@@ -213,6 +228,14 @@ static AwlfRet_e bsp_can_configure(HalCanHandler_t Can, CanCfg_t cfg)
     return AWLF_OK;
 }
 
+#ifdef USE_CAN1
+static const uint8_t gCan1HwBanks[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13};
+#endif
+
+#ifdef USE_CAN2
+static const uint8_t gCan2HwBanks[] = {14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27};
+#endif
+
 static AwlfRet_e bsp_can_control(HalCanHandler_t Can, uint32_t cmd, void* arg)
 {
     if (!Can || !Can->parent.handle)
@@ -232,38 +255,67 @@ static AwlfRet_e bsp_can_control(HalCanHandler_t Can, uint32_t cmd, void* arg)
         ret = AWLF_OK;
     }
     break;
+    case CAN_CMD_GET_CAPABILITY:
+    {
+        if (arg == NULL)
+        {
+            ret = AWLF_ERROR_PARAM;
+            break;
+        }
+        CanHwCapability_t capability = (CanHwCapability_t)arg;
+#ifdef USE_CAN2
+        if (hcan->Instance == CAN2)
+        {
+            capability->hwBankCount = sizeof(gCan2HwBanks) / sizeof(gCan2HwBanks[0]);
+            capability->hwBankList = gCan2HwBanks;
+        }
+        else
+#endif
+        {
+#ifdef USE_CAN1
+            capability->hwBankCount = sizeof(gCan1HwBanks) / sizeof(gCan1HwBanks[0]);
+            capability->hwBankList = gCan1HwBanks;
+#else
+            capability->hwBankCount = 0;
+            capability->hwBankList = NULL;
+#endif
+        }
+    }
+    break;
     case CAN_CMD_START:
-        // 闁告凹鍨版慨銆N闂侇偅鐭穱?
+        // 启动 CAN 外设
         if (HAL_CAN_Start(hcan) != HAL_OK)
             ret = AWLF_ERROR;
         break;
 
     case CAN_CMD_CFG:
-        // 闂佹澘绉堕悿鍜癆N
+        // 配置 CAN
         ret = bsp_can_configure(Can, (CanCfg_t)arg);
         break;
 
     case CAN_CMD_SUSPEND:
-        // 闁哄棗鍊告禒鐕橝N闂侇偅鐭穱?
+        // 暂停 CAN 外设
         if (HAL_CAN_Stop(hcan) != HAL_OK)
             ret = AWLF_ERROR;
         break;
 
     case CAN_CMD_RESUME:
-        // 闁诡厹鍨归ˇ鐫燗N闂侇偅鐭穱?
+        // 恢复 CAN 外设
         if (HAL_CAN_Start(hcan) != HAL_OK)
             ret = AWLF_ERROR;
         break;
 
     case CAN_CMD_SET_IOTYPE:
-        // 閻犱礁澧介悿鍜癆N IO缂侇偉顕ч悗鐑芥晬鐏炵厧鈻忛柤铏灊閼垫垿寮?
-        while (arg == NULL)
+        // 设置 CAN IO 类型并开启对应中断
+        if (arg == NULL)
         {
-        }; // TODO: assert
+            ret = AWLF_ERROR_PARAM;
+            break;
+        }
         uint32_t io_type = *(uint32_t*)arg;
         if (io_type == CAN_REG_INT_TX)
         {
-            // 濞达綀鍎婚崗姗€宕ｉ幋锔瑰亾娴ｇ柉鍘柡?
+            // 开启发送邮箱空中断
             uint32_t txIntEvents = CAN_IT_TX_MAILBOX_EMPTY;
             HAL_CAN_ActivateNotification(hcan, txIntEvents);
         }
@@ -277,57 +329,76 @@ static AwlfRet_e bsp_can_control(HalCanHandler_t Can, uint32_t cmd, void* arg)
 
     case CAN_CMD_CLR_IOTYPE:
     {
-        while (arg == NULL)
+        if (arg == NULL)
         {
-        }; // TODO: assert
-        // 婵炴挸鎳樺▍宥N IO缂侇偉顕ч悗鐑芥晬瀹€鈧々锕傛偨閵娿倛鍘柡?
+            ret = AWLF_ERROR_PARAM;
+            break;
+        }
+        // 清除 CAN IO 类型并关闭对应中断
         uint32_t io_type = *(uint32_t*)arg;
         if (io_type == CAN_REG_INT_TX)
         {
-            // 濠㈡儼绮鹃崗姗€宕ｉ幋锔瑰亾娴ｇ柉鍘柡?
+            // 关闭发送邮箱空中断
             HAL_CAN_DeactivateNotification(hcan, CAN_IT_TX_MAILBOX_EMPTY);
         }
         else if (io_type == CAN_REG_INT_RX)
         {
-            uint32_t rxIntEvents = CAN_IT_RX_FIFO0_MSG_PENDING | CAN_IT_RX_FIFO1_MSG_PENDING | // 闁规亽鍎查弫瑙勭▔椤撶喐鐒?
-                                   CAN_IT_RX_FIFO0_OVERRUN | CAN_IT_RX_FIFO1_OVERRUN |         // 闁规亽鍎查弫鐟扳攦閵忕姴姣?
-                                   CAN_IT_RX_FIFO0_FULL | CAN_IT_RX_FIFO1_FULL;                // 闁规亽鍎查弫绗稩FO婵?
+            uint32_t rxIntEvents = CAN_IT_RX_FIFO0_MSG_PENDING | CAN_IT_RX_FIFO1_MSG_PENDING | // FIFO 待处理
+                                   CAN_IT_RX_FIFO0_OVERRUN | CAN_IT_RX_FIFO1_OVERRUN |         // FIFO 溢出
+                                   CAN_IT_RX_FIFO0_FULL | CAN_IT_RX_FIFO1_FULL;                // FIFO 满
             HAL_CAN_DeactivateNotification(hcan, rxIntEvents);
         }
     }
     break;
 
     case CAN_CMD_CLOSE:
-        // 闁稿繑濞婂Λ纰圓N閻犱焦鍎抽ˇ?
+        // 关闭 CAN 外设
         if (HAL_CAN_Stop(hcan) != HAL_OK)
             ret = AWLF_ERROR;
-        // TODO:
-        // 閻熸瑱绲介崹鍨叏鐎ｎ亜顕ч柨娑樿嫰閸櫻囨⒒椤撶喐顦ч梺鐣屽櫐缁辨繄绮嬫担鐑樻殢濞戞搩鍘介弻?
+        // TODO: 清理错误状态、邮箱状态和可能的残留中断标志
         break;
 
     case CAN_CMD_FLUSH:
-        // 婵炴挸鎳愰埞鏍磽閹惧磭鎽?- 閻庣敻鈧稓鑹維TM32
-        // CAN闁挎稑鐭傚〒鍓佹啺娴ｅ湱顏哥紒宀€鍎ょ敮鎾绩缁傛┃FO
+        // 清空接收 FIFO（按 STM32 HAL 语义手动释放 FIFO 输出邮箱）
+        // 注意：该操作只影响硬件接收缓存，不影响上层软件 FIFO
         hcan->Instance->RF0R |= CAN_RF0R_RFOM0;
         hcan->Instance->RF1R |= CAN_RF1R_RFOM1;
         break;
 
-    case CAN_CMD_SET_FILTER:
-        // 閻犱礁澧介悿鍡楊煥閵堝棗鐨鹃柛?
-        while (!arg)
+    case CAN_CMD_FILTER_ALLOC:
+    {
+        if (arg == NULL)
         {
-        }; // TODO: assert
-        {
-            CanFilterCfg_t filter_cfg = (CanFilterCfg_t)arg;
-            while ((hcan->Instance == CAN1) && filter_cfg->bank >= 14)
-            {
-            }; // TODO: assert
-            while ((hcan->Instance == CAN2) && filter_cfg->bank >= 28)
-            {
-            }; // TODO: assert
-            ret = bsp_can_set_filter(hcan, filter_cfg);
+            ret = AWLF_ERROR_PARAM;
+            break;
         }
-        break;
+        CanHwFilterCfg_t filter_cfg = (CanHwFilterCfg_t)arg;
+        if ((hcan->Instance == CAN1) && filter_cfg->bank >= BSP_CAN_FILTER_SPLIT_BANK)
+        {
+            ret = AWLF_ERROR_PARAM;
+            break;
+        }
+        if ((hcan->Instance == CAN2) &&
+            (filter_cfg->bank < BSP_CAN_FILTER_SPLIT_BANK || filter_cfg->bank >= BSP_CAN_MAX_FILTER_BANK_COUNT))
+        {
+            ret = AWLF_ERROR_PARAM;
+            break;
+        }
+        ret = bsp_can_set_filter(hcan, filter_cfg);
+    }
+    break;
+
+    case CAN_CMD_FILTER_FREE:
+    {
+        if (arg == NULL)
+        {
+            ret = AWLF_ERROR_PARAM;
+            break;
+        }
+        CanHwFilterCfg_t filter_cfg = (CanHwFilterCfg_t)arg;
+        ret = bsp_can_clear_filter(hcan, filter_cfg->bank);
+    }
+    break;
 
     default:
         ret = AWLF_ERROR_PARAM;
@@ -337,41 +408,45 @@ static AwlfRet_e bsp_can_control(HalCanHandler_t Can, uint32_t cmd, void* arg)
     return ret;
 }
 
-static AwlfRet_e bsp_can_recv_msg(HalCanHandler_t Can, CanUserMsg_t msg, int32_t rxfifo_bank)
+static AwlfRet_e bsp_can_recv_msg(HalCanHandler_t Can, CanHwMsg_t msg, int32_t rxfifo_bank)
 {
     CAN_RxHeaderTypeDef rx_header;
     uint8_t data[8];
 
     CAN_HandleTypeDef* hcan = (CAN_HandleTypeDef*)Can->parent.handle;
 
-    // 婵☆偀鍋撻柡灞诲劜鐢挳寮ㄧ粋姗O闁哄嫷鍨伴幆浣圭▔閾忓厜鏁?
+    // 先检查指定硬件 FIFO 是否有可读报文
     uint32_t fifo_fill_level = HAL_CAN_GetRxFifoFillLevel(hcan, rxfifo_bank);
     if (fifo_fill_level == 0)
         return AWLF_ERROR_EMPTY;
 
-    // 濞寸姴瀛╃€垫氨鈧顑慖FO閻犲洩顕цぐ鍥р槈閸喍绱?
+    // 从指定 FIFO 读取一帧报文
     if (HAL_CAN_GetRxMessage(hcan, rxfifo_bank, &rx_header, data) != HAL_OK)
         return AWLF_ERROR;
 
-    if (!msg) // 闁兼椿娅漵g濞戞捁娅ｉ埞鏍晬瀹€鍐惧殯闁哄嫬瀛╅、瀣几鐠鸿櫣婀碦xFifo濞戞捁娅ｉ埞鏍ㄧ▔閺傚墽鐟濋梺鎻掓搐瑜板洨鎲伴崱妤€鏅哥紒娑欑墱閺嗘劙鏁嶅畝鈧ú鍧楀箳閵夈劎绠查柛銉у仦鐎涒晠宕欏ú顏呮櫓閻?
+    if (!msg) // 上层软件 FIFO 满时，core 会传入 NULL，BSP 只需完成硬件读出并返回溢出
         return AWLF_ERR_OVERFLOW;
 
-    // 濠靛鍋勯崢鏍偨閵婏箑鐓曟繛鎴濈墛娴煎懐绱掗幘瀵糕偓?
+    // 填充 core 层硬件报文结构
     msg->dsc.id = (rx_header.IDE == CAN_ID_STD) ? rx_header.StdId : rx_header.ExtId;
     msg->dsc.idType = (rx_header.IDE == CAN_IDE_STD) ? CAN_IDE_STD : CAN_IDE_EXT;
     msg->dsc.msgType = (rx_header.RTR == CAN_RTR_DATA) ? CAN_MSG_TYPE_DATA : CAN_MSG_TYPE_REMOTE;
-    msg->dsc.dataLen =
-        rx_header
-            .DLC; // 闁革负鍔庣划锟犲礂缁愩€濞戞搩鍙忕槐婕嘥M32闁汇劌鍤峀C濞戞挸瀛╅、瀣几閺堜絻鍘柣銊ュ灱ataLen闁哄嫷鍨粩鎾嚊鐎靛憡鐣遍柨?
-                  // <= dataLen <= 8)
-    // 閻犱礁澧介悿鍡楊煥閵堝棗鐨鹃柛锝冨妿缁鳖亪宕?
-    msg->bank = rx_header.FilterMatchIndex;
+    msg->dsc.dataLen = rx_header.DLC; 
+    // 标准 CAN 数据长度范围 0~8，按 HAL 返回 DLC 直接透传
+    // FilterMatchIndex 是本 CAN 实例内索引，需要换算为全局硬件 bank
+    int16_t hwFilterBank = (int16_t)rx_header.FilterMatchIndex;
+#ifdef USE_CAN2
+    if (hcan->Instance == CAN2)
+        hwFilterBank = (int16_t)(hwFilterBank + (int16_t)BSP_CAN_FILTER_SPLIT_BANK);
+#endif
+    msg->hwFilterBank = hwFilterBank;
+    msg->hwTxMailbox = -1;
     msg->dsc.timeStamp = rx_header.Timestamp;
-    memcpy(msg->userBuf, data, msg->dsc.dataLen);
+    memcpy(msg->data, data, msg->dsc.dataLen);
     return AWLF_OK;
 }
 
-static AwlfRet_e bsp_can_send_msg(HalCanHandler_t Can, CanUserMsg_t msg)
+static AwlfRet_e bsp_can_send_msg(HalCanHandler_t Can, CanHwMsg_t msg)
 {
     CAN_TxHeaderTypeDef tx_header;
     if (!Can || !Can->parent.handle || !msg)
@@ -379,46 +454,46 @@ static AwlfRet_e bsp_can_send_msg(HalCanHandler_t Can, CanUserMsg_t msg)
 
     CAN_HandleTypeDef* hcan = (CAN_HandleTypeDef*)Can->parent.handle;
 
-    // 婵☆偀鍋撻柡灞诲劚瑜板倿鏌呮笟鈧崑鏍不鏉堛劍笑闁告熬绠戦崙鈥愁煥?
+    // 发送前先检查硬件邮箱是否有空槽
     uint32_t free_level = HAL_CAN_GetTxMailboxesFreeLevel(hcan);
     if (free_level == 0)
     {
-        msg->bank = -1;
+        msg->hwTxMailbox = -1;
         return AWLF_ERR_OVERFLOW;
     }
 
-    // 闁告垵妫楅ˇ顒勫矗閹达腹鍋撴担鎼炰粓
+    // 组织发送头
     tx_header.StdId = msg->dsc.id;
     tx_header.ExtId = msg->dsc.id;
     tx_header.IDE = (msg->dsc.idType == CAN_IDE_EXT) ? CAN_ID_EXT : CAN_ID_STD;
     tx_header.RTR = (msg->dsc.msgType == CAN_MSG_TYPE_REMOTE) ? CAN_RTR_REMOTE : CAN_RTR_DATA;
     tx_header.DLC = msg->dsc.dataLen;
-    tx_header.TransmitGlobalTime = DISABLE; // 鐟滅増鎸告晶鐘诲几閼哥數鈧垶寮抽崒娑欘槯濞戞挸绉甸弫顕€骞?
-    // 闁告垵妫楅ˇ顒勫矗閹达腹鍋撴担瑙勬闁?
+    tx_header.TransmitGlobalTime = DISABLE; // 不使能全局时间戳回传
+    // 拷贝发送数据
     uint8_t data[8];
-    if (msg->userBuf != NULL && msg->dsc.dataLen > 0)
+    if (msg->data != NULL && msg->dsc.dataLen > 0)
     {
-        memcpy(data, msg->userBuf, msg->dsc.dataLen);
+        memcpy(data, msg->data, msg->dsc.dataLen);
     }
-    // 闁煎浜滄慨鈺呮焻婢跺顏ラ柛娆愬灴閳ь兛绶氶崑鏍不閸楃偠瀚欓柛娆愬灴閳ь兛鐒︾粔鐑藉箒?
+    // 发送并获取实际占用的硬件邮箱
     uint32_t txMailboxBank = 0;
     if (HAL_CAN_AddTxMessage(hcan, &tx_header, data, &txMailboxBank) != HAL_OK)
     {
-        msg->bank = -1;
+        msg->hwTxMailbox = -1;
         return AWLF_ERROR;
     }
 
-    // 濠靛鍋勯崢鏍矗閹达腹鍋撴笟鈧崑鏍不鏉堚晛鍋嶇€?
+    // 将 HAL 邮箱标识映射为 core 约定的 0/1/2
     switch (txMailboxBank)
     {
     case CAN_TX_MAILBOX0:
-        msg->bank = 0;
+        msg->hwTxMailbox = 0;
         break;
     case CAN_TX_MAILBOX1:
-        msg->bank = 1;
+        msg->hwTxMailbox = 1;
         break;
     case CAN_TX_MAILBOX2:
-        msg->bank = 2;
+        msg->hwTxMailbox = 2;
         break;
     }
     return AWLF_OK;
@@ -446,43 +521,42 @@ static void bsp_can_pre_init(void)
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+    CAN_HandleTypeDef* hcan = &gBspCan[BSP_CAN1_IDX].handle;
 #ifdef USE_CAN1
     {
-        CAN_HandleTypeDef* hcan = &gBspCan[BSP_CAN1_IDX].handle;
         (void)hcan;
+        __HAL_RCC_CAN1_CLK_ENABLE();
+        if (__HAL_RCC_GPIOD_IS_CLK_DISABLED())
+            __HAL_RCC_GPIOD_CLK_ENABLE();
+        GPIO_InitStruct.Pin = GPIO_PIN_0 | GPIO_PIN_1;
+        GPIO_InitStruct.Alternate = GPIO_AF9_CAN1;
+        HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+        HAL_NVIC_SetPriority(CAN1_RX0_IRQn, 5,0); // 中断优先级需低于 FreeRTOS 可屏蔽阈值，避免破坏内核临界区
+        HAL_NVIC_EnableIRQ(CAN1_RX0_IRQn);
+        HAL_NVIC_SetPriority(CAN1_RX1_IRQn, 5, 0);
+        HAL_NVIC_EnableIRQ(CAN1_RX1_IRQn);
+        HAL_NVIC_SetPriority(CAN1_TX_IRQn, 5, 0);
+        HAL_NVIC_EnableIRQ(CAN1_TX_IRQn);
+        HAL_NVIC_SetPriority(CAN1_SCE_IRQn, 5, 0);
+        HAL_NVIC_EnableIRQ(CAN1_SCE_IRQn);
     }
-    __HAL_RCC_CAN1_CLK_ENABLE();
-    if (__HAL_RCC_GPIOD_IS_CLK_DISABLED())
-        __HAL_RCC_GPIOD_CLK_ENABLE();
-
-    GPIO_InitStruct.Pin = GPIO_PIN_0 | GPIO_PIN_1;
-    GPIO_InitStruct.Alternate = GPIO_AF9_CAN1;
-    HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
-    HAL_NVIC_SetPriority(
-        CAN1_RX0_IRQn, 0,
-        0); // 濞村吋锚閸樻稓鐥閻楁挳骞戦鈧〒鍓佹啺娴ｇ晫娈堕柡浣芥彧缁辨繈鎳撻崘顓燁€氶柛鎺旀珔M闁哄牆鎼▍鎺撶鏉炴媽鍘珻AN闁诡剝宕甸崵搴ㄦ儍閸曨垰娅㈤悷鏇氱劍閳ь儸宥囩閺夆晜鐟╅崳椋庣磼?
-    HAL_NVIC_EnableIRQ(CAN1_RX0_IRQn);
-    HAL_NVIC_SetPriority(CAN1_RX1_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(CAN1_RX1_IRQn);
-    HAL_NVIC_SetPriority(CAN1_TX_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(CAN1_TX_IRQn);
-    HAL_NVIC_SetPriority(CAN1_SCE_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(CAN1_SCE_IRQn);
 #endif
 #ifdef USE_CAN2
     {
-        CAN_HandleTypeDef* hcan = &gBspCan[BSP_CAN2_IDX].handle;
         __HAL_RCC_CAN2_CLK_ENABLE();
         if (__HAL_RCC_GPIOB_IS_CLK_DISABLED())
             __HAL_RCC_GPIOB_CLK_ENABLE();
-        HAL_CAN_DeInit(hcan);
         GPIO_InitStruct.Pin = GPIO_PIN_5 | GPIO_PIN_6;
         GPIO_InitStruct.Alternate = GPIO_AF9_CAN2;
         HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-        HAL_NVIC_SetPriority(CAN2_RX0_IRQn, 0, 0);
         HAL_NVIC_EnableIRQ(CAN2_RX0_IRQn);
-        HAL_NVIC_SetPriority(CAN2_RX1_IRQn, 0, 0);
+        HAL_NVIC_SetPriority(CAN2_RX0_IRQn, 5, 0);
         HAL_NVIC_EnableIRQ(CAN2_RX1_IRQn);
+        HAL_NVIC_SetPriority(CAN2_RX1_IRQn, 5, 0);
+        HAL_NVIC_EnableIRQ(CAN2_TX_IRQn);
+        HAL_NVIC_SetPriority(CAN2_TX_IRQn, 5, 0);
+        HAL_NVIC_EnableIRQ(CAN2_SCE_IRQn);
+        HAL_NVIC_SetPriority(CAN2_SCE_IRQn, 5, 0);
     }
 #endif
 }

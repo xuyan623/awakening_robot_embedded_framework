@@ -15,49 +15,67 @@ OSAL_STATIC_ASSERT((OSAL_TASK_NAME_MAX == configMAX_TASK_NAME_LEN), osal_task_na
 OSAL_STATIC_ASSERT((OSAL_STACK_WORD_BYTES == sizeof(StackType_t)), osal_stack_word_bytes_mismatch);
 OSAL_STATIC_ASSERT((OSAL_WAIT_FOREVER == portMAX_DELAY), osal_wait_forever_mismatch);
 
-int osal_in_isr(void)
+int osal_is_in_isr(void)
 {
     return (xPortIsInsideInterrupt() == pdTRUE) ? 1 : 0;
 }
 
-void osal_critical_enter(void)
+void osal_irq_lock_task(void)
 {
-    taskENTER_CRITICAL();
-}
-
-void osal_critical_exit(void)
-{
-    taskEXIT_CRITICAL();
-}
-
-uint32_t osal_irq_save(void)
-{
-    if (osal_in_isr())
-    {
-        UBaseType_t mask = taskENTER_CRITICAL_FROM_ISR();
-        return 0x80000000u | (uint32_t)mask;
-    }
-    taskENTER_CRITICAL();
-    return 0u;
-}
-
-void osal_irq_restore(uint32_t state)
-{
-    if ((state & 0x80000000u) != 0u)
-    {
-        UBaseType_t mask = (UBaseType_t)(state & 0x7FFFFFFFu);
-        taskEXIT_CRITICAL_FROM_ISR(mask);
+    int in_isr = osal_is_in_isr();
+    OSAL_ASSERT(in_isr == 0);
+    if (in_isr)
         return;
-    }
+
+    taskENTER_CRITICAL();
+}
+
+void osal_irq_unlock_task(void)
+{
+    int in_isr = osal_is_in_isr();
+    OSAL_ASSERT(in_isr == 0);
+    if (in_isr)
+        return;
+
     taskEXIT_CRITICAL();
+}
+
+osal_irq_isr_state_t osal_irq_lock_from_isr(void)
+{
+    int in_isr = osal_is_in_isr();
+    OSAL_ASSERT(in_isr != 0);
+    if (!in_isr)
+        return (osal_irq_isr_state_t)0u;
+
+    return (osal_irq_isr_state_t)taskENTER_CRITICAL_FROM_ISR();
+}
+
+void osal_irq_unlock_from_isr(osal_irq_isr_state_t state)
+{
+    int in_isr = osal_is_in_isr();
+    OSAL_ASSERT(in_isr != 0);
+    if (!in_isr)
+        return;
+
+    taskEXIT_CRITICAL_FROM_ISR((UBaseType_t)state);
 }
 
 void* osal_malloc(size_t size)
 {
+    int in_isr = osal_is_in_isr();
+    OSAL_ASSERT(in_isr == 0);
+    if (in_isr)
+        return NULL;
+
     return pvPortMalloc(size);
 }
 
 void osal_free(void* ptr)
 {
+    int in_isr = osal_is_in_isr();
+    OSAL_ASSERT(in_isr == 0);
+    if (in_isr)
+        return;
+
     vPortFree(ptr);
 }

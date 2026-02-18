@@ -12,31 +12,34 @@ osal_timer_t osal_timer_create(const char* name, uint32_t period_ms, int auto_re
                                       (TimerCallbackFunction_t)cb);
 }
 
-int osal_timer_start(osal_timer_t timer, uint32_t timeout_ms)
+osal_status_t osal_timer_start(osal_timer_t timer, uint32_t timeout_ms)
 {
     if (!timer)
-        return OSAL_ERR_PARAM;
-    if (osal_in_isr())
-        return OSAL_ERR_CTX;
-    return xTimerStart((TimerHandle_t)timer, osal_ms_to_ticks(timeout_ms)) == pdPASS ? OSAL_OK : OSAL_ERR_TIMEOUT;
+        return OSAL_INVALID;
+    if (osal_is_in_isr())
+        return OSAL_INVALID;
+    BaseType_t ok = xTimerStart((TimerHandle_t)timer, osal_ms_to_ticks(timeout_ms));
+    return osal_wait_result_to_status(ok, timeout_ms);
 }
 
-int osal_timer_stop(osal_timer_t timer, uint32_t timeout_ms)
+osal_status_t osal_timer_stop(osal_timer_t timer, uint32_t timeout_ms)
 {
     if (!timer)
-        return OSAL_ERR_PARAM;
-    if (osal_in_isr())
-        return OSAL_ERR_CTX;
-    return xTimerStop((TimerHandle_t)timer, osal_ms_to_ticks(timeout_ms)) == pdPASS ? OSAL_OK : OSAL_ERR_TIMEOUT;
+        return OSAL_INVALID;
+    if (osal_is_in_isr())
+        return OSAL_INVALID;
+    BaseType_t ok = xTimerStop((TimerHandle_t)timer, osal_ms_to_ticks(timeout_ms));
+    return osal_wait_result_to_status(ok, timeout_ms);
 }
 
-int osal_timer_delete(osal_timer_t timer, uint32_t timeout_ms)
+osal_status_t osal_timer_delete(osal_timer_t timer, uint32_t timeout_ms)
 {
     if (!timer)
-        return OSAL_ERR_PARAM;
-    if (osal_in_isr())
-        return OSAL_ERR_CTX;
-    return xTimerDelete((TimerHandle_t)timer, osal_ms_to_ticks(timeout_ms)) == pdPASS ? OSAL_OK : OSAL_ERR_TIMEOUT;
+        return OSAL_INVALID;
+    if (osal_is_in_isr())
+        return OSAL_INVALID;
+    BaseType_t ok = xTimerDelete((TimerHandle_t)timer, osal_ms_to_ticks(timeout_ms));
+    return osal_wait_result_to_status(ok, timeout_ms);
 }
 
 void* osal_timer_get_id(osal_timer_t timer)

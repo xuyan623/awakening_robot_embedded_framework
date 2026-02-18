@@ -10,6 +10,7 @@
 ---@field defines string[] 预处理宏
 ---@field includedirs string[] 头文件目录
 ---@field sources string[] 源文件路径
+---@field override_sources string[] 强覆盖源文件（直接并入 binary）
 ---@field osal table<string, string> OS 配置路径映射
 ---@field startup table<string, string> 启动文件映射
 ---@field linkerscript table<string, string> 链接脚本映射
@@ -24,7 +25,17 @@ local board = {
         "boards/rm-c-board/include",
     },
     sources = {
-        "boards/rm-c-board/source/**.c",
+        "boards/rm-c-board/source/core/bsp_cpu.c",
+        "boards/rm-c-board/source/core/bsp_dwt.c",
+        "boards/rm-c-board/source/peripherals/can/bsp_can_impl.c",
+        "boards/rm-c-board/source/peripherals/serial/bsp_serial_impl.c",
+        "boards/rm-c-board/source/peripherals/serial/bsp_serial_init.c",
+        "boards/rm-c-board/source/port/aw_port_hw.c",
+    },
+    override_sources = {
+        -- 这些文件用于覆盖启动文件中的 weak ISR，必须直连最终 binary。
+        "boards/rm-c-board/source/peripherals/can/bsp_can_it.c",
+        "boards/rm-c-board/source/peripherals/serial/serial_it.c",
     },
     osal = {
         freertos = "boards/rm-c-board/osal/freertos",

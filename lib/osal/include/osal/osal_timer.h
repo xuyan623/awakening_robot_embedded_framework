@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "osal_core.h"
+
 typedef void* osal_timer_t;
 typedef void (*osal_timer_cb_t)(osal_timer_t timer);
 
@@ -21,25 +23,25 @@ osal_timer_t osal_timer_create(const char* name, uint32_t period_ms, int auto_re
  * @brief 启动定时器
  * @param timer 定时器句柄
  * @param timeout_ms 超时时间（ms），可用 OSAL_WAIT_FOREVER
- * @return OSAL_OK 成功；OSAL_ERR 失败
+ * @return `OSAL_OK` 成功；失败返回 `OSAL_WOULD_BLOCK/OSAL_TIMEOUT/OSAL_INVALID/OSAL_INTERNAL`
  */
-int osal_timer_start(osal_timer_t timer, uint32_t timeout_ms);
+osal_status_t osal_timer_start(osal_timer_t timer, uint32_t timeout_ms);
 
 /**
  * @brief 停止定时器
  * @param timer 定时器句柄
  * @param timeout_ms 超时时间（ms），可用 OSAL_WAIT_FOREVER
- * @return OSAL_OK 成功；OSAL_ERR 失败
+ * @return `OSAL_OK` 成功；失败返回 `OSAL_WOULD_BLOCK/OSAL_TIMEOUT/OSAL_INVALID/OSAL_INTERNAL`
  */
-int osal_timer_stop(osal_timer_t timer, uint32_t timeout_ms);
+osal_status_t osal_timer_stop(osal_timer_t timer, uint32_t timeout_ms);
 
 /**
  * @brief 删除定时器
  * @param timer 定时器句柄
  * @param timeout_ms 超时时间（ms），可用 OSAL_WAIT_FOREVER
- * @return OSAL_OK 成功；OSAL_ERR 失败
+ * @return `OSAL_OK` 成功；失败返回 `OSAL_WOULD_BLOCK/OSAL_TIMEOUT/OSAL_INVALID/OSAL_INTERNAL`
  */
-int osal_timer_delete(osal_timer_t timer, uint32_t timeout_ms);
+osal_status_t osal_timer_delete(osal_timer_t timer, uint32_t timeout_ms);
 
 /**
  * @brief 获取用户指针

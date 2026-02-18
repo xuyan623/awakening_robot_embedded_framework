@@ -6,6 +6,7 @@
 相关文档索引：
 - `awlf/document/build/BuildTasksManual.md`：内置任务与参数说明。
 - `awlf/document/build/BuildSystemBestPractices.md`：构建系统最佳工程实践。
+- `awlf/document/build/upstream_xmake_armlink_sourcefile_nil.md`：XMake `armlink.lua` 缺陷的上游提交材料（复现、根因、建议 patch）。
 
 ## 2. 构建系统设计方法论
 - **分层原则**：构建系统只在 `awlf/build/` 集中管理“选项、规则、工具链、共享模块”，模块级构建脚本就地维护，避免全局脚本侵入模块。
@@ -16,7 +17,7 @@
 - **脚本域约束**：仅在脚本域使用 `import/try/raise/task.run` 等 API，描述域只做目标/规则/选项声明，避免配置期卡死或无效调用。
 
 ## 3. 构建链路全景（从配置到产物）
-1) 配置阶段：`xmake f` 读取 `board/os/toolchain/sync_accel` 等选项。  
+1) 配置阶段：`xmake f` 读取 `board/os/toolchain/sync_accel/semihosting` 等选项。  
 2) 选项回调：`awlf/build/config/options.lua` 在 `after_check` 中写入上下文。  
 3) 上下文持久化：`awlf/build/modules/awlf.lua` 将关键字段保存到配置缓存。  
 4) 编译数据库：通过 `plugin.compile_commands.autoupdate` 在构建后生成 `compile_commands.json` 至项目根目录。  
@@ -39,7 +40,8 @@
 - `awlf/platform/osal/`：OS 抽象层与 OS 端口。
 - `awlf/platform/sync/`：同步原语与可选加速后端。
 自定义任务：
-- `xmake flash`：通过 J-Link Commander 烧录，默认优先使用 HEX，可通过 `--firmware` 指定 ELF/HEX。
+- `xmake flash`：通过 J-Link Commander 烧录，默认优先使用 HEX，可通过 `--firmware` 指定 ELF/HEX，并可通过 `--native_output=true` 透传原生输出。
+- 调试器支持矩阵（当前）：`awlf_preset.flash` 仅接入 `jlink`；`daplink` 尚未实现，仅作为规划项记录。
 
 
 ## 5. 目录职责与依赖方向简图
@@ -102,10 +104,11 @@ flowchart LR
 
 ## 8. 模块职责细节
 ### 8.1 配置模块
-- `awlf/build/config/defaults.lua`：定义 `board/os/sync_accel` 默认值。
+- `awlf/build/config/defaults.lua`：定义 `board/os/sync_accel/semihosting` 默认值。
 - `awlf/build/config/options.lua`：
-  - 枚举可选 board/os。
+  - 基于 `awlf/platform/bsp/data/boards/index.lua` 与 `awlf/platform/osal/index.lua` 枚举可选 board/os。
   - 将 board/os/toolchain/arch/flags 写入上下文。
+  - `semihosting=off` 时为 armclang 可执行目标注入非 semihosting syscall 覆盖桩，避免运行期触发 semihost BKPT。
   - 对默认值进行合法性校验。
   - `config.arch` 作为平台架构标识：优先取工具链数据中的 `arch`，缺失时使用板级 CPU 架构。
     - `context.arch` 表示 CPU 架构（来自 BSP 芯片数据），芯片仅提供 `arch_traits`，由工具链映射生成 `arch_flags`。
@@ -114,6 +117,9 @@ flowchart LR
 - `awlf.context`：
   - 注入 `arch_flags` 与 `toolchain_flags`。
   - 配置阶段校验硬浮点支持，并确保工具链已完成检测。
+  - 构建后输出 `build mode` 与 `memory distribution`：
+    - `build mode` 通过目标模式接口判定（`debug`/`release`）。
+    - `memory distribution` 输出 `FLASH/RAM` 的 `used/total/percent`（优先解析 ELF 用量与链接脚本容量）。
 - `awlf.board_assets`：
   - 注入启动文件与链接脚本。
   - 依赖 `toolchain_linker_flag`。
@@ -134,6 +140,63 @@ flowchart LR
 - `bsp/inputs.lua`：输出 `defines/includedirs/sources/headerfiles/extrafiles`。
 - `bsp/assets.lua`：解析启动文件/链接脚本与板级 OS 配置目录。
 - rm-c-board 的 armclang scatter 不再将 FreeRTOS 相关对象固定放入 `RW_IRAM2`，避免 CCM/DMA 风险。
+
+### 8.5 armclang 运行时与 semihosting 维护约束
+- 运行时决策入口：`awlf/build/toolchains/toolchain_runtime.lua`。
+  - `resolve_semihosting_mode()` 只接受 `off/on`。
+  - `resolve_runtime_payload("armclang", "off")` 返回 `awlf/build/runtime/armclang/semihost_stub.c`。
+  - `resolve_runtime_payload("armclang", "on")` 返回空注入。
+- 注入生效点：`awlf/build/rules/context.lua` 的 `awlf.context` 规则。
+  - 仅对 `target:kind() == "binary"` 注入运行时 payload。
+  - 静态库目标不应注入 semihost stub，避免污染库边界。
+- stub 语义约束（`awlf/build/runtime/armclang/semihost_stub.c`）：
+  - 目标是“去 semihost 依赖”，不是“模拟完整主机文件系统”。
+  - `_sys_open` 返回伪句柄用于保障 C 运行库初始化继续执行。
+  - `_sys_exit` 保持死循环，避免落入未定义宿主行为。
+- 维护原则：
+  - 修改 stub 返回值前，必须评估对启动阶段、日志路径与异常路径的影响。
+  - 不要在业务代码中直接依赖 semihosting 行为；semihosting 仅视为调试能力。
+
+### 8.6 Cortex-Debug 下载策略约束
+- 推荐策略：`.elf` 作为符号载体，`.hex` 作为下载载体（`restore xxx.hex`）。
+- `gnu-rm` 可使用 `load`；`armclang` 在部分调试链路下使用 `load` 可能出现段装载语义不一致，应优先 `restore .hex`。
+- 禁止将 `restore xxx.bin binary` 作为通用模板默认值：该命令缺省从 `0x00000000` 写入，强依赖目标地址别名，不具备稳定迁移性。
+
+### 8.7 weak/strong 覆盖链接治理约束
+根因定义：
+- 问题属于“静态库成员抽取机制”范畴，不是 `weak` 语法错误。
+- 当 `weak` 符号已满足未定义引用时，链接器不会继续抽取库内同名 `strong` 成员。
+- 仅调整库顺序通常无法根治该类问题。
+
+当前实现（必须保持）：
+- `platform/bsp/inputs.lua` 负责收集 `override_sources`（vendor/chip/board）并从 `inputs.sources` 中排除。
+- `build/rules/board_assets.lua` 仅对 `binary` 目标注入 `override_sources`，并带入板级 `includedirs/defines`。
+- 覆盖源通过“直连最终 `binary`”参与链接，不依赖静态库抽取偶然性。
+
+维护约束：
+- 新增必须覆盖 `weak` 的点时，必须将 `strong` 源文件登记到对应层级 `override_sources`。
+- 不得默认依赖 `whole-archive` 作为跨工具链通用方案。
+- 不得将“应用层 weak 扩展”作为推荐模式对外传播；当前版本明确不建议应用层使用 weak 语义承载业务逻辑。
+- 中断/启动/端口钩子等关键覆盖点，必须在构建验证阶段执行符号强弱校验。
+
+未来规划（路线要求）：
+1. XMake 层：
+   - 建立不局限于单一层级的通用强制覆盖规则，统一管理 BSP/OSAL/SYNC/APP 等覆盖源。
+2. 用户层：
+   - 推进无感开发能力，目标是强定义位置不受文件层级与组织方式约束，仍可稳定正确链接。
+
+### 8.8 armclang 链路确定性与诊断约束
+当前实现（必须保持）：
+- `awlf/build/toolchains/toolchain_overrides.lua` 对 `armclang` 强制补全 `toolset_as=armclang`，禁止回退到 `armasm`。
+- 若用户显式传入 `toolset_as` 且值不是 `armclang`，配置期直接报错，不做隐式兼容。
+
+版本门禁（配置期/构建期）：
+- XMake 最低版本：由工程根 `xmake.lua` 的 `set_xmakever("3.0.7")` 统一约束。
+- armclang 最低版本：`6.14`（通过 `armclang --version` 解析并强校验）。
+- 任一版本不满足门禁时，必须直接失败，不允许降级继续构建。
+- 授权前提（配置期基线）：
+  - armclang 链路要求 `armlink` 具备非 Lite 授权能力。
+  - 维护者在发布/分发前必须执行 `armlink --vsn`，若 `Product` 含 `MDK-ARM Lite`，需标记为不满足 armclang 发布前提。
 
 ## 9. 数据结构与合并策略
 ### 9.1 Toolchain 数据
@@ -225,6 +288,7 @@ function get()
   return board
 end
 ```
+新增 board 时需同步更新 `awlf/platform/bsp/data/boards/index.lua`。
 
 ### 11.4 新增 board 构建脚本
 文件：`awlf/platform/bsp/boards/my-board/xmake.lua`
@@ -263,6 +327,7 @@ target_end()
 ```lua
 osal = { myos = "boards/my-board/osal/myos" }
 ```
+新增 OS 时需同步更新 `awlf/platform/osal/index.lua`。
 
 ### 11.6 新增 Sync 加速后端
 目录：`awlf/platform/sync/myos/`，编写 `sync_accel.lua`：
@@ -306,8 +371,28 @@ end
 - `toolchain_linker_flag` 缺失：链接脚本无法注入。
 - 工具链路径错误：`sdk/bin` 校验失败。
 - FreeRTOS 端口文件缺失：`tar_os` 加载时失败。
+- `semihosting` 值非法：`options.lua`/`toolchain_runtime.lua` 会在配置期报错（仅允许 `off/on`）。
+- `armclang semihost stub missing`：`awlf/build/runtime/armclang/semihost_stub.c` 缺失或路径变更未同步。
+- `armclang toolset_as unsupported`：仅支持 `toolset_as=armclang`；请移除自定义回退配置。
+- `armclang version not supported`：当前版本门禁为 `>= 6.14`，请升级 Arm Compiler 6。
+- `Fatal error: L6050U`：当前 `armlink` 为 Lite 授权导致代码大小受限；先执行 `armlink --vsn` 确认 `Product`，若为 `MDK-ARM Lite` 则需切换到非 Lite 授权或改用 `gnu-rm`。
+- 出现 `attempt to concatenate a nil value (global 'sourcefile')`：请检查本机 XMake 是否低于 `3.0.7`，并升级后重试。
+- Cortex-Debug `armclang + load` 初始化异常：优先切换为 `restore <profile>.hex` 下载链路。
+- weak 覆盖未生效：检查 `override_sources` 是否登记、是否被 `awlf.board_assets` 注入到 `binary`，并核对最终 ELF 符号是否仍为 `W/weak`。
+- 预设中配置了 `flash.daplink` 但不生效：当前任务链路只读取 `flash.jlink`，DAPLink 尚未接入实现。
 
 ## 13. 变更记录
+- 2026-02-13：`awlf.context` 新增构建后摘要输出，统一输出 `build mode` 与 `memory distribution`（全工具链可用）。
+- 2026-02-13：XMake 门禁提升至 `3.0.7`；移除 `armlink sourcefile=nil` 兼容保护逻辑，统一依赖上游修复版本。
+- 2026-02-12：新增 `upstream_xmake_armlink_sourcefile_nil.md`，固化 XMake `armlink.lua` 缺陷的最小复现、根因与上游 patch 建议。
+- 2026-02-12：收敛 armclang 汇编链路为 `toolset_as=armclang`，禁止 `armasm` 回退；新增 armclang 版本门禁与 `armlink sourcefile=nil` 错误透传保护。
+- 2026-02-08：统一文档口径：`awlf_preset.flash` 当前仅支持 J-Link，DAPLink 标记为后续规划；同步 QuickStart/开发者手册/维护者手册说明。
+- 2026-02-07：新增 weak/strong 覆盖链接治理文档，明确静态库抽取根因、`override_sources` 机制、维护约束与通用化规划目标。
+- 2026-02-07：补充 armclang semihosting 维护约束文档（`toolchain_runtime` 决策链路、`awlf.context` 注入边界、stub 语义约束）。
+- 2026-02-07：补充 Cortex-Debug 多工具链下载策略文档：推荐 `.elf` 仅做符号、`.hex` 做下载；armclang 默认采用 `restore .hex`。
+- 2026-02-07：新增 `--semihosting=off|on` 构建选项；默认 `off`。当 toolchain=armclang 且 `off` 时，自动注入 syscall 覆盖桩以消除 semihosting BKPT 风险。
+- 2026-02-07：`xmake flash` 新增 `--native_output` 参数，用于按需透传烧录器原生输出。
+- 2026-02-04：board/os 列表改为静态索引，避免描述域目录扫描。
 - 2026-02-01：新增《BuildSystemBestPractices.md》最佳工程实践文档。
 - 2026-02-01：记录已知限制：`xmake flash` 使用 ELF 可能无法实际烧录，建议使用 HEX。
 - 2026-02-01：`robot_project` 输出文件名显式为 `.elf`；`xmake flash` 要求固件路径必须带扩展名。

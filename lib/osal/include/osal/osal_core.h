@@ -6,54 +6,67 @@
 
 #include "osal_config.h"
 
-/* OSAL通用返回码定义*/
+/* OSAL 统一状态码（Phase 1 合同） */
+typedef int32_t osal_status_t;
+
 #define OSAL_OK (0)               /* 成功 */
-#define OSAL_ERR (-1)             /* 通用失败 */
-#define OSAL_ERR_TIMEOUT (-2)     /* 超时 */
-#define OSAL_ERR_PARAM (-3)       /* 参数错误 */
-#define OSAL_ERR_CTX (-4)         /* 上下文错误（中断/线程不匹配） */
-#define OSAL_ERR_NOMEM (-5)       /* 资源不足/内存不足 */
-#define OSAL_ERR_UNSUPPORTED (-6) /* 不支持的操作 */
+#define OSAL_TIMEOUT (-1)         /* 超时（timeout > 0 或 WAIT_FOREVER 语义超时） */
+#define OSAL_WOULD_BLOCK (-2)     /* 非阻塞调用（timeout=0）条件不满足 */
+#define OSAL_NO_RESOURCE (-3)     /* 资源不足（内存/句柄/队列槽位） */
+#define OSAL_INVALID (-4)         /* 参数/句柄/上下文非法 */
+#define OSAL_NOT_SUPPORTED (-5)   /* 端口不支持 */
+#define OSAL_INTERNAL (-6)        /* 内部错误 */
 
 /**
  * @brief 判断当前是否处于中断上下文
  * @return 1 表示在中断中；0 表示在线程上下文
  */
-int osal_in_isr(void);
+int osal_is_in_isr(void);
 
 /**
- * @brief 进入临界区（线程上下文）
- * @note ISR中请使用 osal_irq_save/osal_irq_restore
+ * @brief ISR 临界区状态类型
+ * @note 由端口实现定义其具体含义；当前 FreeRTOS 端映射为中断屏蔽旧值。
  */
-void osal_critical_enter(void);
+typedef uint32_t osal_irq_isr_state_t;
 
 /**
- * @brief 退出临界区（线程上下文）
+ * @brief 在线程上下文进入临界区
+ * @note 禁止在 ISR 中调用。
  */
-void osal_critical_exit(void);
+void osal_irq_lock_task(void);
 
 /**
- * @brief 保存中断状态并进入临界区（线程/中断皆可）
- * @return 用于恢复的状态值
+ * @brief 在线程上下文退出临界区
+ * @note 禁止在 ISR 中调用。
  */
-uint32_t osal_irq_save(void);
+void osal_irq_unlock_task(void);
 
 /**
- * @brief 恢复中断状态（配合 osal_irq_save 使用）
- * @param state 之前保存的状态值
+ * @brief 在 ISR 上下文进入临界区并保存中断状态
+ * @return ISR 临界区恢复状态
+ * @note 禁止在线程上下文调用。
  */
-void osal_irq_restore(uint32_t state);
+osal_irq_isr_state_t osal_irq_lock_from_isr(void);
+
+/**
+ * @brief 在 ISR 上下文恢复中断状态
+ * @param state `osal_irq_lock_from_isr` 返回的状态
+ * @note 禁止在线程上下文调用。
+ */
+void osal_irq_unlock_from_isr(osal_irq_isr_state_t state);
 
 /**
  * @brief OSAL内存申请
  * @param size 申请字节数
  * @return 成功返回指针，失败返回NULL
+ * @note 严格模式下禁止在 ISR 中调用；若误用则触发断言，运行时返回 NULL。
  */
 void* osal_malloc(size_t size);
 
 /**
  * @brief OSAL内存释放
  * @param ptr 指针
+ * @note 严格模式下禁止在 ISR 中调用；若误用则触发断言，运行时直接返回。
  */
 void osal_free(void* ptr);
 
@@ -74,6 +87,6 @@ void osal_free(void* ptr);
 #endif
 
 /* 断言当前处于线程上下文 */
-#define OSAL_ASSERT_IN_TASK() OSAL_ASSERT(!osal_in_isr())
+#define OSAL_ASSERT_IN_TASK() OSAL_ASSERT(!osal_is_in_isr())
 
 #endif

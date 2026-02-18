@@ -6,35 +6,50 @@
 ## 目录结构
 - `include/osal`：OSAL 核心接口（线程、时间、事件、互斥锁、信号量、队列、定时器）
 - `platform/osal/freertos`：FreeRTOS 端口实现（MCU 优先）
-- `platform/osal/posix`：POSIX 端口实现（Linux 用户态）
+- `platform/osal/linux`：Linux 端口骨架（Phase 0 占位）
 
 ## OSAL 接口层
 `include/osal` 下的头文件是对外唯一接口：
 - `osal_core.h`：中断判断、临界区、内存申请释放、通用返回码
-- `osal_thread.h`：线程创建/休眠/退出/删除/让出
-- `osal_time.h`：时间获取（ms/us/ns）与周期延时
-- `osal_event.h`：事件对象（event group，支持 ISR set）
+- `osal_thread.h`：线程创建/join/退出/删除/让出
+- `osal_time.h`：单调时钟（ms/us/ns）、休眠与周期延时
+- `osal_event.h`：事件标志对象（event flags，支持 ISR set）
 - `osal_timer.h`：软件定时器
 - `osal_mutex.h`：互斥锁（线程上下文）
-- `osal_sem.h`：信号量（ISR 支持 post）
+- `osal_sem.h`：信号量（ISR 支持 post，支持计数查询）
 - `osal_queue.h`：队列（ISR 支持收发）
 
 ## 端口层说明
 - `platform/osal/freertos`：基于 FreeRTOS 的实现
-- `platform/osal/posix`：基于 POSIX 系统调用的实现（用于 Linux）
+- `platform/osal/linux`：Linux 端口骨架（待后续阶段启用）
 
 ## 时间单位约定
 - OSAL 公共接口默认使用 **毫秒**。
 - FreeRTOS 端口将毫秒转换为 tick（向上取整），再依据 `configTICK_RATE_HZ` 返回毫秒。
-- POSIX 端口使用 `clock_gettime(CLOCK_MONOTONIC)` 获取高精度时间。
+- Linux 端口在后续阶段接入。
+
+## 时间语义
+- `osal_time_now_monotonic*` 提供单调时间，不受系统时间回拨影响。
+- `osal_sleep_ms(OSAL_WAIT_FOREVER)` 非法，返回 `OSAL_INVALID`。
+- `osal_delay_until(deadline_cursor_ms, period_ms, missed_periods)` 使用“过期追赶”策略：每次只推进一个周期，不跳过周期；`missed_periods` 反馈本次调用前已经过期的周期数量。
+- `deadline_cursor_ms` 采用 in/out 游标语义：首次传 `0`，后续原样回传，不需要调用者手动计算下一次唤醒时刻。
+- `osal_sem_wait(OSAL_WAIT_FOREVER)` 保留“无限等待”语义。
+- `osal_sem_post/osal_sem_post_from_isr` 在计数已满时返回 `OSAL_NO_RESOURCE`（非阻塞失败）。
+- `osal_mutex` 为非递归语义；同线程重复加锁按超时规则处理。
+- `osal_mutex_unlock` 在非 owner 调用时返回 `OSAL_INVALID`。
 
 ## ISR 使用规则
 - ISR 中禁止调用阻塞接口。
 - 仅使用 ISR 版本的 API：
-  - `osal_event_set_isr`
-  - `osal_sem_post_isr`
-  - `osal_queue_send_isr`
-  - `osal_queue_recv_isr`
+  - `osal_event_flags_set_from_isr`
+  - `osal_sem_post_from_isr`
+  - `osal_sem_get_count_from_isr`
+  - `osal_queue_send_from_isr`
+  - `osal_queue_recv_from_isr`
+- 线程接口约束：
+  - `osal_thread_attr_t.stack_size` 统一使用“字节”语义。
+  - `osal_thread_create/join/delete/yield/exit/kernel_start` 仅允许在线程上下文调用。
+  - 当前 FreeRTOS 端口 `osal_thread_join` 返回 `OSAL_NOT_SUPPORTED`。
 
 ## 配置项
 主要配置位于 `lib/include/core/aw_config.h` 与 `lib/osal/include/osal/osal_config.h`：
@@ -65,14 +80,14 @@ static void app_thread(void* arg)
     (void)arg;
     while (1)
     {
-        osal_thread_sleep_ms(10);
+        (void)osal_sleep_ms(10);
     }
 }
 
 void app_start(void)
 {
     osal_thread_t thread;
-    osal_thread_attr_t attr = { "app", 512, 2 };
+    osal_thread_attr_t attr = { "app", 2048, 2 };
     (void)osal_thread_create(&thread, &attr, app_thread, NULL);
     (void)osal_kernel_start();
 }

@@ -79,6 +79,7 @@ extern uint32_t FreeRTOSRunTimeTicks;
 #define INCLUDE_vTaskDelay                              1                       /* 任务延时 */
 #define INCLUDE_xTaskGetSchedulerState                  1                       /* 获取任务调度器状态 */
 #define INCLUDE_xTaskGetCurrentTaskHandle               1                       /* 获取当前任务的任务句柄 */
+#define INCLUDE_xQueueGetMutexHolder                    1                       /* 获取互斥锁当前持有者 */
 #define INCLUDE_uxTaskGetStackHighWaterMark             1                       /* 获取任务堆栈历史剩余最小值 */
 #define INCLUDE_xTaskGetIdleTaskHandle                  1                       /* 获取空闲任务的任务句柄 */
 #define INCLUDE_eTaskGetState                           1                       /* 获取任务状态 */

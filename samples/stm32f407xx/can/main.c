@@ -19,21 +19,22 @@ typedef struct CanTxInfo
     uint8_t data[CAN_TX_MSG_BUF_LEN][8];
 } __aw_packed CanTxInfo_s;
 
-static void can_info_init(CanUserMsg_t msg, uint32_t bank, uint8_t* data)
+static void can_info_init(CanUserMsg_t msg, CanFilterHandle_t filterHandle, uint8_t* data)
 {
-    msg->bank = bank;
+    msg->filterHandle = filterHandle;
     msg->userBuf = data;
 }
 
 static void can_txinfo_init(CanUserMsg_t msg, uint8_t* data)
 {
-    msg->bank = 0;
+    msg->filterHandle = 0;
     msg->userBuf = data;
 }
 
 uint8_t cnt = 0;
-static void can_filter_callback(Device_t dev, void* param, size_t filterBank, size_t msgCount)
+static void can_filter_callback(Device_t dev, void* param, CanFilterHandle_t filterHandle, size_t msgCount)
 {
+    (void)filterHandle;
     CanInfo_t info = (CanInfo_t)param;
     device_read(dev, NULL, &info->msg[cnt], msgCount);
     for (size_t i = 0; i < msgCount; i++)
@@ -62,12 +63,17 @@ void can_test_task(void* param)
     {
     };
 
-    for (size_t i = 0; i < CAN_MSG_BUF_LEN; i++)
-        can_info_init(&canInfo.msg[i], 0, canInfo.data[i]);
+    CanFilterAllocArg_s filterAllocArg = {
+        .request = CAN_FILTER_REQUEST_INIT(CAN_FILTER_MODE_MASK, CAN_FILTER_ID_STD_EXT, 0x101, 0x1F0, can_filter_callback, (void*)&canInfo),
+    };
+    ret = device_ctrl(can, CAN_CMD_FILTER_ALLOC, &filterAllocArg);
+    while (ret != AWLF_OK)
+    {
+    };
 
-    CanFilterCfg_s FilterCfg =
-        CAN_FILTER_CFG_INIT(0, CAN_FILTER_MODE_MASK, CAN_FILTER_ID_STD_EXT, 0x101, 0x1F0, can_filter_callback, (void*)&canInfo);
-    device_ctrl(can, CAN_CMD_SET_FILTER, &FilterCfg);
+    for (size_t i = 0; i < CAN_MSG_BUF_LEN; i++)
+        can_info_init(&canInfo.msg[i], filterAllocArg.handle, canInfo.data[i]);
+
     device_ctrl(can, CAN_CMD_START, NULL);
 
     while (1)
@@ -85,7 +91,7 @@ int main(void)
     osal_thread_t task1 = NULL;
     osal_thread_attr_t attr = {0};
     attr.name = "CanTestTask";
-    attr.stack_size = 512;
+    attr.stack_size = 512u * OSAL_STACK_WORD_BYTES;
     attr.priority = 4;
     int result1 = osal_thread_create(&task1, &attr, can_test_task, NULL);
     while (result1 != OSAL_OK)

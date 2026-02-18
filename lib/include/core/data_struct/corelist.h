@@ -1,14 +1,13 @@
 #ifndef __CORE_LIST_H__
 #define __CORE_LIST_H__
 #ifdef __cplusplus
-extern "C"
-{
+extern "C" {
 #endif
 
 #include <stdint.h>
 
 #ifndef NULL
-#define NULL ((void*)0)
+#define NULL ((void *)0)
 #endif
 #define LIST_POISON1 NULL
 #define LIST_POISON2 NULL
@@ -20,7 +19,7 @@ extern "C"
  * @param   member  结构体成员名称
  * @retval  MEMBER成员相对于结构体首地址的偏移量
  */
-#define offsetof(type, member) (size_t)(&((type*)0)->member)
+#define offsetof(type, member) (size_t)(&((type *)0)->member)
 #endif
 
 // 根据member的地址获取type的起始地址
@@ -31,18 +30,17 @@ extern "C"
  * @param   member  结构体成员名称
  * @return  type*   结构体起始地址
  */
-#define container_of(ptr, type, member)                                                                                                    \
-    ({                                                                                                                                     \
-        const typeof(((type*)0)->member)* __mptr = (ptr); /* 声明了一个临时的结构体成员指针__mptr */                                       \
-        (type*)((char*)__mptr - offsetof(type, member));                                                                                   \
+#define container_of(ptr, type, member)                                                               \
+    ({                                                                                                \
+        const typeof(((type *)0)->member) *__mptr = (ptr); /* 声明了一个临时的结构体成员指针__mptr */ \
+        (type *)((char *)__mptr - offsetof(type, member));                                            \
     }) /* 根据成员偏移量计算出结构体起始地址 */
 
-    // 链表结构
-    struct list_head
-    {
-        struct list_head* prev;
-        struct list_head* next;
-    };
+// 链表结构
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+};
 
 /*初始化API*********************************************************/
 /**
@@ -51,137 +49,137 @@ extern "C"
  * @param name 链表头名称
  */
 #define LIST_HEAD_INIT(name) {&(name), &(name)}
-#define LIST_HEAD(name) struct list_head name = LIST_HEAD_INIT(name)
-    static inline void INIT_LIST_HEAD(struct list_head* list)
-    {
-        list->next = list;
-        list->prev = list;
-    }
-    /*添加元素API*********************************************************/
-    static inline void __list_add(struct list_head* new_node, struct list_head* prev, struct list_head* next)
-    {
-        new_node->prev = prev;
-        prev->next = new_node;
-        new_node->next = next;
-        next->prev = new_node;
-    }
+#define LIST_HEAD(name)      struct list_head name = LIST_HEAD_INIT(name)
+static inline void INIT_LIST_HEAD(struct list_head *list)
+{
+    list->next = list;
+    list->prev = list;
+}
+/*添加元素API*********************************************************/
+static inline void __list_add(struct list_head *new_node, struct list_head *prev, struct list_head *next)
+{
+    new_node->prev = prev;
+    prev->next     = new_node;
+    new_node->next = next;
+    next->prev     = new_node;
+}
 
-    /**
-     * @brief 将一个新节点插入到链表头部之后
-     *
-     * @param new_node   新节点
-     * @param head       链表头
-     */
-    static inline void list_add(struct list_head* new_node, struct list_head* head)
-    {
-        __list_add(new_node, head, head->next);
-    }
+/**
+ * @brief 将一个新节点插入到链表头部之后
+ *
+ * @param new_node   新节点
+ * @param head       链表头
+ */
+static inline void list_add(struct list_head *new_node, struct list_head *head)
+{
+    __list_add(new_node, head, head->next);
+}
 
-    /**
-     * @brief 将一个新节点插入到链表尾部之前
-     *
-     * @param new_node    新节点
-     * @param head        链表头
-     */
-    static inline void list_add_tail(struct list_head* new_node, struct list_head* head)
-    {
-        __list_add(new_node, head->prev, head);
-    }
-    /*删除元素API*********************************************************/
-    static inline void __list_del(struct list_head* prev, struct list_head* next)
-    {
-        prev->next = next;
-        next->prev = prev;
-    }
-    /**
-     * @brief 删除一个节点
-     * @param entry 要删除的节点
-     */
-    static inline void list_del(struct list_head* entry)
-    {
-        __list_del(entry->prev, entry->next);
-        entry->next = entry;
-        entry->prev = entry;
-    }
+/**
+ * @brief 将一个新节点插入到链表尾部之前
+ *
+ * @param new_node    新节点
+ * @param head        链表头
+ */
+static inline void list_add_tail(struct list_head *new_node, struct list_head *head)
+{
+    __list_add(new_node, head->prev, head);
+}
+/*删除元素API*********************************************************/
+static inline void __list_del(struct list_head *prev, struct list_head *next)
+{
+    prev->next = next;
+    next->prev = prev;
+}
+/**
+ * @brief 删除一个节点
+ * @param entry 要删除的节点
+ */
+static inline void list_del(struct list_head *entry)
+{
+    __list_del(entry->prev, entry->next);
+    entry->next = entry;
+    entry->prev = entry;
+}
 
-    /*检测链表空API*********************************************************/
-    static inline uint8_t list_empty(const struct list_head* head)
-    {
-        return (head->next == head);
-    }
-    /*两表合并API*********************************************************/
-    static inline void __list_splice(struct list_head* list, struct list_head* head)
-    {
-        struct list_head* first = list->next;
-        struct list_head* last = list->prev;
-        struct list_head* at = head->next;
-        first->prev = head;
-        head->next = first;
-        last->next = at;
-        at->prev = last;
-    }
+/*检测链表空API*********************************************************/
+static inline uint8_t list_empty(const struct list_head *head)
+{
+    return (head->next == head);
+}
+/*两表合并API*********************************************************/
+static inline void __list_splice(struct list_head *list, struct list_head *head)
+{
+    struct list_head *first = list->next;
+    struct list_head *last  = list->prev;
+    struct list_head *at    = head->next;
+    first->prev             = head;
+    head->next              = first;
+    last->next              = at;
+    at->prev                = last;
+}
 
-    /**
-     * @brief 两表合并
-     *
-     * @param list 被吞并的表
-     * @param head 被嵌入的表的头节点
-     * @note  嵌入位置为head与head->next之间
-     */
-    static inline void list_splice(struct list_head* list, struct list_head* head)
-    {
-        if (!list_empty(list))
-            __list_splice(list, head);
-    }
+/**
+ * @brief 两表合并
+ *
+ * @param list 被吞并的表
+ * @param head 被嵌入的表的头节点
+ * @note  嵌入位置为head与head->next之间
+ */
+static inline void list_splice(struct list_head *list, struct list_head *head)
+{
+    if (!list_empty(list))
+        __list_splice(list, head);
+}
 
-    /*替换节点API*********************************************************/
-    /**
-     * @brief 节点替换
-     *
-     * @param old_node 被替换
-     * @param new_node 新节点
-     */
-    static inline void list_replace(struct list_head* old_node, struct list_head* new_node)
-    {
-        new_node->next = old_node->next;
-        new_node->next->prev = new_node;
-        new_node->prev = old_node->prev;
-        new_node->prev->next = new_node;
-    }
+/*替换节点API*********************************************************/
+/**
+ * @brief 节点替换
+ *
+ * @param old_node 被替换
+ * @param new_node 新节点
+ */
+static inline void list_replace(struct list_head *old_node, struct list_head *new_node)
+{
+    new_node->next       = old_node->next;
+    new_node->next->prev = new_node;
+    new_node->prev       = old_node->prev;
+    new_node->prev->next = new_node;
+}
 
-    /**
-     * @brief 在list_replace的基础上，对被替换的节点进行初始化
-     *
-     * @param old_node 被替换
-     * @param new_node 新节点
-     */
-    static inline void list_replace_init(struct list_head* old_node, struct list_head* new_node)
-    {
-        list_replace(old_node, new_node);
-        INIT_LIST_HEAD(old_node);
-    }
-    /*链表转移*********************************************************/
-    /**
-     * @brief 将list从原表中删除，并插入到head之后
-     * @param list 要转移节点
-     * @param head 被插入节点
-     */
-    static inline void list_move(struct list_head* list, struct list_head* head)
-    {
-        __list_del(list->prev, list->next); // 将list从原表中删除
-        list_add(list, head);               // 将list插入到head之后
-    }
+/**
+ * @brief 在list_replace的基础上，对被替换的节点进行初始化
+ *
+ * @param old_node 被替换
+ * @param new_node 新节点
+ */
+static inline void list_replace_init(struct list_head *old_node, struct list_head *new_node)
+{
+    list_replace(old_node, new_node);
+    INIT_LIST_HEAD(old_node);
+}
+/*链表转移*********************************************************/
+/**
+ * @brief 将list从原表中删除，并插入到head之后
+ * @param list 要转移节点
+ * @param head 被插入节点
+ */
+static inline void list_move(struct list_head *list, struct list_head *head)
+{
+    __list_del(list->prev, list->next); // 将list从原表中删除
+    list_add(list, head);               // 将list插入到head之后
+}
 
-    /**
-     * @brief 将list从原表中删除，并插入到head之前
-     * @param list 要转移节点
-     * @param head 被插入节点
-     */
-    static inline void list_move_tail(struct list_head* list, struct list_head* head)
-    {
-        __list_del(list->prev, list->next); // 将list从原表中删除
-        list_add_tail(list, head);          // 将list插入到head之前
-    }
+/**
+ * @brief 将list从原表中删除，并插入到head之前
+ * @param list 要转移节点
+ * @param head 被插入节点
+ */
+static inline void list_move_tail(struct list_head *list, struct list_head *head)
+{
+    __list_del(list->prev, list->next); // 将list从原表中删除
+    list_add_tail(list, head);          // 将list插入到head之前
+}
 
 /**
  * @brief 链表元素转容器结构体
@@ -229,8 +227,8 @@ extern "C"
  * @param member     容器类型
  * @note  pos为链表元素对应的结构体类型, 而不是链表类型
  */
-#define list_for_each_entry(pos, head, member)                                                                                             \
-    for (pos = list_entry((head)->next, typeof(*pos), member); &pos->member != (head);                                                     \
+#define list_for_each_entry(pos, head, member)                                         \
+    for (pos = list_entry((head)->next, typeof(*pos), member); &pos->member != (head); \
          pos = list_entry(pos->member.next, typeof(*pos), member))
 
 /**
@@ -241,8 +239,8 @@ extern "C"
  * @param type     结构体类型
  * @note  pos为链表元素对应的结构体类型, 而不是链表类型
  */
-#define list_for_each_entry_safe(pos, n, head, member)                                                                                     \
-    for (pos = list_entry((head)->next, typeof(*pos), member), n = list_entry(pos->member.next, typeof(*pos), member);                     \
+#define list_for_each_entry_safe(pos, n, head, member)                                                                 \
+    for (pos = list_entry((head)->next, typeof(*pos), member), n = list_entry(pos->member.next, typeof(*pos), member); \
          &pos->member != (head); pos = n, n = list_entry(n->member.next, typeof(*n), member))
 
 #ifdef __cplusplus

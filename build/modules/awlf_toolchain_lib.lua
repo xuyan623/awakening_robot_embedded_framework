@@ -11,6 +11,8 @@ local flags_module = import("toolchains.toolchain_flags", {rootdir = build_root}
 local arch_module = import("toolchains.toolchain_arch", {rootdir = build_root})
 local image_module = import("toolchains.toolchain_image", {rootdir = build_root})
 local validate_module = import("toolchains.toolchain_validate", {rootdir = build_root})
+local runtime_module = import("toolchains.toolchain_runtime", {rootdir = build_root})
+local memreport_module = import("toolchains.toolchain_memreport", {rootdir = build_root})
 
 --- 获取工具链配置数据
 ---@return AwlfToolchainsConfig
@@ -145,6 +147,29 @@ function should_include_arch_ldflags(toolchain_config, toolchain_name)
     return config_module.should_include_arch_ldflags(toolchain_config, toolchain_name)
 end
 
+--- 解析 semihosting 模式
+---@param mode string|nil 模式（off/on）
+---@return string normalized_mode
+function resolve_semihosting_mode(mode)
+    return runtime_module.resolve_semihosting_mode(mode)
+end
+
+--- 解析运行时注入信息
+---@param toolchain_name string|nil 工具链名称
+---@param semihosting_mode string|nil semihosting 模式
+---@return table payload
+function resolve_runtime_payload(toolchain_name, semihosting_mode)
+    return runtime_module.resolve_runtime_payload(toolchain_name, semihosting_mode)
+end
+
+--- 生成构建后内存分布报告
+---@param target target 目标对象
+---@param context table 上下文
+---@return table report 报告数据
+function build_memory_distribution_report(target, context)
+    return memreport_module.build_memory_distribution_report(target, context)
+end
+
 --- 返回工具链工具库
 ---@return AwlfToolchainLib
 return {
@@ -165,4 +190,7 @@ return {
     validate_hard_float_support = validate_hard_float_support,
     ensure_toolchain_checked = ensure_toolchain_checked,
     should_include_arch_ldflags = should_include_arch_ldflags,
+    resolve_semihosting_mode = resolve_semihosting_mode,
+    resolve_runtime_payload = resolve_runtime_payload,
+    build_memory_distribution_report = build_memory_distribution_report,
 }
