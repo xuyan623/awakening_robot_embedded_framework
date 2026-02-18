@@ -57,5 +57,9 @@ rule("awlf.context")
         end
         local awlf = import("awlf", {rootdir = modules_root})
         awlf.awlf_print_build_profile(target)
+        local report = awlf.awlf_verify_link_contract(target)
+        if not report or report.ok ~= true then
+            raise((report and report.reason) or "[awlf] link contract check failed")
+        end
     end)
 rule_end()

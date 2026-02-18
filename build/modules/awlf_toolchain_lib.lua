@@ -13,6 +13,7 @@ local image_module = import("toolchains.toolchain_image", {rootdir = build_root}
 local validate_module = import("toolchains.toolchain_validate", {rootdir = build_root})
 local runtime_module = import("toolchains.toolchain_runtime", {rootdir = build_root})
 local memreport_module = import("toolchains.toolchain_memreport", {rootdir = build_root})
+local linkguard_module = import("toolchains.toolchain_linkguard", {rootdir = build_root})
 
 --- 获取工具链配置数据
 ---@return AwlfToolchainsConfig
@@ -170,6 +171,14 @@ function build_memory_distribution_report(target, context)
     return memreport_module.build_memory_distribution_report(target, context)
 end
 
+--- 校验 AWLF 链接契约
+---@param target target 目标对象
+---@param context table 上下文
+---@return table report 校验结果
+function verify_awlf_link_contract(target, context)
+    return linkguard_module.verify_awlf_link_contract(target, context)
+end
+
 --- 返回工具链工具库
 ---@return AwlfToolchainLib
 return {
@@ -193,4 +202,5 @@ return {
     resolve_semihosting_mode = resolve_semihosting_mode,
     resolve_runtime_payload = resolve_runtime_payload,
     build_memory_distribution_report = build_memory_distribution_report,
+    verify_awlf_link_contract = verify_awlf_link_contract,
 }

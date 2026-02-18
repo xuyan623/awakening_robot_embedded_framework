@@ -173,6 +173,9 @@ xmake clean
 - **image tool not found**：工具链镜像转换工具未安装或 `bin` 路径不正确。
 - **FreeRTOSConfig.h not found**：板级 OS 配置路径缺失或不正确。
 - **FreeRTOS 内存布局**：默认不将 FreeRTOS 对象固定到 `RW_IRAM2`，如需使用 CCM，请调整板级链接脚本。
+- **`[awlf] link contract check failed`**：
+  - 含义：`tar_os`/`tar_sync` 未按约定提供关键强符号（如 `osal_malloc`、`completion_init`）。
+  - 正确修复方向：修复底层模块构建脚本与依赖传播，不要在应用目标直接 `add_deps("tar_os")` 或 `add_deps("tar_sync")`。
 
 ## 11. 新手常用调整
 ### 11.1 构建与烧录
@@ -365,6 +368,23 @@ xmake clean
    - 实现不局限于单一层级（board/chip/vendor）的通用强制覆盖规则，统一治理 `weak` 覆盖源注入。
 2. 用户层：
    - 推进“无感开发”能力，使强定义位置尽可能不受目录层级与文件组织限制，保证可预测的正确链接结果。
+
+### 11.6 OSAL/SYNC 依赖边界与链接契约（开发者）
+当前实现约束：
+- `tar_awlf` 与 `tar_osal` 是“聚合目标”（`phony`），只负责依赖传播，不直接产出静态库文件。
+- 真实代码产物由 `tar_os`、`tar_sync` 等模块静态库承担。
+- 应用目标只依赖 `tar_awlf`，不直连 OSAL/SYNC 实现层目标。
+
+为什么这样设计：
+- 避免“空静态库”导致的依赖错觉（例如历史上的 `libtar_osal.a` 空归档现象）。
+- 保持模块职责边界：应用层不感知 OS 端口细节，便于板级与 OS 迁移。
+- 降低链接顺序偶然性对结果的影响。
+
+构建护栏（已内置）：
+- 二进制构建后会做链接契约校验：
+  - `tar_os` 必须提供 `osal_malloc`、`osal_free` 强符号；
+  - `tar_sync` 必须提供 `completion_init`、`completion_wait` 强符号。
+- 若校验失败，构建会直接报错并提示修复方向。
 
 ## 12. 任务文档
 - `awlf/document/build/BuildTasksManual.md`：内置任务与参数说明（含 `xmake flash`）。

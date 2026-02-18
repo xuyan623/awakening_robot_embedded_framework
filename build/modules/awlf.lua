@@ -334,6 +334,15 @@ function awlf_print_build_profile(target)
     end
 end
 
+--- 校验链接契约（关键符号必须由指定模块提供）
+---@param target target|nil 目标对象
+---@return table report 校验结果
+function awlf_verify_link_contract(target)
+    local modules_root = os.scriptdir()
+    local toolchain_lib = import("awlf_toolchain_lib", {rootdir = modules_root})
+    return toolchain_lib.verify_awlf_link_contract(target, get_context())
+end
+
 return {
     get_preset_root = get_preset_root,
     get_preset = get_preset,
@@ -341,5 +350,6 @@ return {
     get_context = get_context,
     awlf_print_info = awlf_print_info,
     awlf_print_build_profile = awlf_print_build_profile,
+    awlf_verify_link_contract = awlf_verify_link_contract,
     sync_context_from_config = sync_context_from_config,
 }

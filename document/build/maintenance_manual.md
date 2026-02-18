@@ -13,6 +13,7 @@
 - **单一入口**：顶层 `xmake.lua` 仅负责入口转发与目标聚合，不直接承载工具链或板级逻辑。
 - **数据/行为分离**：板级/芯片/厂商数据放在 `awlf/platform/bsp/data`，构建规则与工具链行为放在 `awlf/build`。
 - **依赖方向**：模块构建脚本可以调用构建层 API（如 `awlf`、`bsp`），构建层不得硬编码模块路径或板级细节。
+- **口径边界**：构建期依赖用于约束“可见与可链接”关系，不等同于运行时调用链；运行时依赖需结合接口调用/注册路径单独审计。
 - **上移准则**：当逻辑被多个模块复用、与具体板级无关、且不依赖运行时代码时，才上移到 `awlf/build`；否则保持模块内聚。
 - **脚本域约束**：仅在脚本域使用 `import/try/raise/task.run` 等 API，描述域只做目标/规则/选项声明，避免配置期卡死或无效调用。
 
@@ -29,7 +30,7 @@
 ## 4. 构建入口与目录职责
 - `xmake.lua`：顶层入口，定义 `robot_project` 并挂载规则。
 - `awlf/xmake.lua`：AWLF 构建入口转发（实际入口在 `awlf/build/xmake.lua`）。
-- `awlf/build/xmake.lua`：AWLF 构建入口，加载配置/规则/子模块，并在构建后输出 AWLF 信息。
+- `awlf/build/xmake.lua`：AWLF 构建入口，加载配置/规则/子模块，并定义聚合目标 `tar_awlf`。
 
 核心目录职责：
 - `awlf/build/config/`：构建选项与默认值。
@@ -120,6 +121,7 @@ flowchart LR
   - 构建后输出 `build mode` 与 `memory distribution`：
     - `build mode` 通过目标模式接口判定（`debug`/`release`）。
     - `memory distribution` 输出 `FLASH/RAM` 的 `used/total/percent`（优先解析 ELF 用量与链接脚本容量）。
+  - 构建后执行链接契约校验（`tar_os`/`tar_sync` 关键强符号检查），失败即终止构建。
 - `awlf.board_assets`：
   - 注入启动文件与链接脚本。
   - 依赖 `toolchain_linker_flag`。
@@ -185,7 +187,18 @@ flowchart LR
 2. 用户层：
    - 推进无感开发能力，目标是强定义位置不受文件层级与组织方式约束，仍可稳定正确链接。
 
-### 8.8 armclang 链路确定性与诊断约束
+### 8.8 OSAL/SYNC 聚合边界与链接契约约束
+当前实现（必须保持）：
+- `tar_awlf` 与 `tar_osal` 使用聚合目标（`phony`），不直接产出静态库。
+- 应用目标只依赖 `tar_awlf`，禁止直连 `tar_os`、`tar_sync`。
+- `tar_osal -> tar_os` 采用 `public` 依赖传播，确保链路闭包稳定。
+
+维护约束：
+- 不得把“应用层直接补 `add_deps("tar_os")`/`add_deps("tar_sync")`”作为修复手段。
+- 若出现 OSAL/SYNC 未定义引用，应优先检查聚合层依赖传播与底层模块产物完整性。
+- 任何新增 OSAL/SYNC 核心符号都应同步纳入链接契约校验列表。
+
+### 8.9 armclang 链路确定性与诊断约束
 当前实现（必须保持）：
 - `awlf/build/toolchains/toolchain_overrides.lua` 对 `armclang` 强制补全 `toolset_as=armclang`，禁止回退到 `armasm`。
 - 若用户显式传入 `toolset_as` 且值不是 `armclang`，配置期直接报错，不做隐式兼容。
@@ -380,8 +393,10 @@ end
 - Cortex-Debug `armclang + load` 初始化异常：优先切换为 `restore <profile>.hex` 下载链路。
 - weak 覆盖未生效：检查 `override_sources` 是否登记、是否被 `awlf.board_assets` 注入到 `binary`，并核对最终 ELF 符号是否仍为 `W/weak`。
 - 预设中配置了 `flash.daplink` 但不生效：当前任务链路只读取 `flash.jlink`，DAPLink 尚未接入实现。
+- `[awlf] link contract check failed`：`tar_os`/`tar_sync` 的关键符号未以强符号形态提供；应回查模块构建输入与依赖传播，不要在应用目标补直连依赖。
 
 ## 13. 变更记录
+- 2026-02-18：将 `tar_awlf`、`tar_osal` 收敛为聚合目标（`phony`），并新增二进制构建后的 OSAL/SYNC 关键符号链接契约校验。
 - 2026-02-13：`awlf.context` 新增构建后摘要输出，统一输出 `build mode` 与 `memory distribution`（全工具链可用）。
 - 2026-02-13：XMake 门禁提升至 `3.0.7`；移除 `armlink sourcefile=nil` 兼容保护逻辑，统一依赖上游修复版本。
 - 2026-02-12：新增 `upstream_xmake_armlink_sourcefile_nil.md`，固化 XMake `armlink.lua` 缺陷的最小复现、根因与上游 patch 建议。

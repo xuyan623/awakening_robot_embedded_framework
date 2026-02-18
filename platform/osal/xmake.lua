@@ -35,11 +35,11 @@ if os_name and os_name ~= "" then
 end
 
 --- @target tar_osal
---- @brief OSAL 聚合静态库
---- @details 汇总 OS 端口并依赖 OSAL API。
+--- @brief OSAL 聚合目标
+--- @details 仅做依赖聚合与传播，不直接产出静态库。
 target("tar_osal")
-    set_kind("static")
+    set_kind("phony")
     add_deps("tar_awapi_osal", {public = true})
-    add_deps("tar_os")
+    add_deps("tar_os", {public = true})
     add_rules("awlf.context")
 target_end()
