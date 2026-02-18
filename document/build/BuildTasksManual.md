@@ -35,6 +35,7 @@ xmake flash --device=STM32F407IG --interface=swd --speed=4000 --program="D:/Prog
 | `--prefer_hex` | 自动推导时优先使用 HEX | `true` | `flash.jlink.prefer_hex` | 仅在未指定 `--firmware` 时生效 |
 | `--reset` | 烧录前后是否复位 | `true` | `flash.jlink.reset` | `true`/`false` |
 | `--run` | 烧录完成后是否运行 | `true` | `flash.jlink.run` | `true`/`false` |
+| `--native_output` | 是否透传烧录器原生输出 | `false` | `flash.jlink.native_output` | `true`/`false` |
 
 **产物选择策略**：
 1) 若指定 `--firmware` 或 `flash.jlink.firmware`（或兼容字段 `flash.jlink.file`），直接使用该文件（必须带后缀）。
@@ -46,6 +47,7 @@ xmake flash --device=STM32F407IG --interface=swd --speed=4000 --program="D:/Prog
 - 烧录结束后 J-Link 自动退出。
 - 若预设中的 toolchain 与配置不一致，会在烧录前输出警告并以配置为准。
 - 成功执行后会输出实际使用的可执行文件路径、固件路径与 toolchain。
+- 当 `native_output=true` 时，终端会透传 J-Link Commander 的原生输出。
 - 当前已知限制：使用 `--firmware` 指向 `.elf` 时可能无法实际烧录，请优先使用 `.hex`。
 
 ## 4. `awlf_preset.lua` 预设示例
@@ -61,6 +63,7 @@ flash = {
     prefer_hex = true,
     reset = true,
     run = true,
+    native_output = false,
   },
 }
 ```

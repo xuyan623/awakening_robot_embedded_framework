@@ -1,10 +1,12 @@
 ﻿--- @file awlf/build/config/options.lua
 --- @brief AWLF 构建选项定义
---- @details 负责 board/os/sync_accel 选项与上下文写入。
+--- @details 负责 board/os/sync_accel/semihosting 选项与上下文写入。
 local awlf_root = path.join(os.scriptdir(), "..", "..")
 local modules_root = path.join(awlf_root, "build", "modules")
 local bsp_root = path.join(awlf_root, "platform", "bsp")
 local osal_root = path.join(awlf_root, "platform", "osal")
+includes(path.join(bsp_root, "data", "boards", "index.lua"))
+includes(path.join(osal_root, "index.lua"))
 local defaults = awlf_defaults or {}
 if type(defaults) ~= "table" then
     raise("defaults invalid: expected table")
@@ -23,34 +25,35 @@ local function list_contains(values, value)
     return false
 end
 
---- 枚举 BSP 下的板级名称
----@param bsp_root_dir string BSP 根目录
----@return string[] names 板级名称列表
-local function list_board_names(bsp_root_dir)
-    local board_dir = path.join(bsp_root_dir, "data", "boards")
-    local board_files = os.files(path.join(board_dir, "*.lua"))
+--- 校验并规范化名称列表
+---@param values table|nil 名称列表
+---@param label string 标签
+---@return string[] names 名称列表
+local function normalize_name_list(values, label)
+    if type(values) ~= "table" then
+        raise(label .. " invalid: expected list")
+    end
     local names = {}
-    for _, file in ipairs(board_files) do
-        names[#names + 1] = path.basename(file)
+    for _, value in ipairs(values) do
+        if type(value) ~= "string" or value == "" then
+            raise(label .. " invalid item: " .. tostring(value))
+        end
+        names[#names + 1] = value
     end
     table.sort(names)
     return names
 end
 
---- 枚举 OSAL 目录下的 OS 名称
----@param osal_root_dir string OSAL 根目录
+--- 获取 BSP 板级名称列表（静态索引）
+---@return string[] names 板级名称列表
+local function list_board_names()
+    return normalize_name_list(awlf_board_index, "board index")
+end
+
+--- 获取 OSAL OS 名称列表（静态索引）
 ---@return string[] names OS 名称列表
-local function list_os_names(osal_root_dir)
-    local os_dirs = os.dirs(path.join(osal_root_dir, "*"))
-    local names = {}
-    for _, dir in ipairs(os_dirs) do
-        local name = path.filename(dir)
-        if name and name ~= "" then
-            names[#names + 1] = name
-        end
-    end
-    table.sort(names)
-    return names
+local function list_os_names()
+    return normalize_name_list(awlf_os_index, "os index")
 end
 
 --- 应用工具链默认值并返回上下文
@@ -124,6 +127,17 @@ local function resolve_sync_default(value)
     return normalized
 end
 
+--- 解析 semihosting 默认值
+---@param value string|nil 默认值
+---@return string resolved
+local function resolve_semihosting_default(value)
+    local normalized = value or "off"
+    if normalized ~= "off" and normalized ~= "on" then
+        raise("default semihosting invalid: " .. tostring(normalized))
+    end
+    return normalized
+end
+
 --- 持久化 flash 预设到配置
 ---@param config table 配置对象
 ---@param preset table|nil 预设配置
@@ -164,11 +178,12 @@ local function persist_flash_preset(config, preset)
     end
 end
 
-local board_values = list_board_names(bsp_root)
+local board_values = list_board_names()
 local default_board = resolve_default_value(defaults.board, board_values, "board")
-local os_values = list_os_names(osal_root)
+local os_values = list_os_names()
 local default_os = resolve_default_value(defaults.os, os_values, "os")
 local default_sync_accel = resolve_sync_default(defaults.sync_accel)
+local default_semihosting = resolve_semihosting_default(defaults.semihosting)
 
 --- @option board
 --- @brief 选择板级
@@ -290,4 +305,14 @@ option("sync_accel")
     set_showmenu(true)
     set_description("select sync accel backend")
     set_values("auto", "none")
+option_end()
+
+--- @option semihosting
+--- @brief semihosting 策略
+--- @details 仅支持 off/on；off 时启用 armclang 非 semihosting syscall 覆盖桩。
+option("semihosting")
+    set_default(default_semihosting)
+    set_showmenu(true)
+    set_description("select semihosting mode")
+    set_values("off", "on")
 option_end()

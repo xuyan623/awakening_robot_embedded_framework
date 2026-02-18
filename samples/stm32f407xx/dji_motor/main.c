@@ -1,6 +1,6 @@
 /**
  * @file main.c
- * @brief DJI 电机通用集成测试用例 (OSAL版本)
+ * @brief DJI 电机通用集成测试用例
  * @note  功能：驱动总线上所有配置的电机，使其每隔 1 秒转动 90 度 (阶跃响应测试)
  */
 #include "drivers/motor/vendors/dji/dji_motor_drv.h"
@@ -25,9 +25,9 @@
 #define TASK_PRIO_CONTROL 7 // 最高优先级
 #define TASK_PRIO_LOGIC 4   // 普通优先级
 
-/* 任务堆栈大小 (OSAL) */
-#define TASK_STACK_CONTROL 2048
-#define TASK_STACK_LOGIC 1024
+/* 任务堆栈大小（字节，按历史 word 配置显式换算） */
+#define TASK_STACK_CONTROL (2048u * OSAL_STACK_WORD_BYTES)
+#define TASK_STACK_LOGIC (1024u * OSAL_STACK_WORD_BYTES)
 
 /* 控制参数 */
 #define CONTROL_FREQ_HZ 1000  /* 1kHz 控制频率 */
@@ -86,21 +86,21 @@ static MotorTestNode_s g_motor_configs[] = {
         .spd_pid_cfg = {50.0f, 500.0f, 0.0f, 25000.0f},
     },
     /* [Case 3] GM6020 ID:2 (电压模式) */
-    {
-        .type = DJI_MOTOR_TYPE_GM6020,
-        .id = 2,
-        .mode = DJI_CTRL_MODE_VOLTAGE,
-        .pos_pid_cfg = {32.0f, 1.3f, 0.0f, 320.0f},
-        .spd_pid_cfg = {50.0f, 500.0f, 0.0f, 25000.0f},
-    },
-    /* [Case 4] GM6020 ID:3 (电压模式) */
-    {
-        .type = DJI_MOTOR_TYPE_GM6020,
-        .id = 3,
-        .mode = DJI_CTRL_MODE_VOLTAGE,
-        .pos_pid_cfg = {32.0f, 1.3f, 0.0f, 320.0f},
-        .spd_pid_cfg = {50.0f, 500.0f, 0.0f, 25000.0f},
-    },
+    // {
+    //     .type = DJI_MOTOR_TYPE_GM6020,
+    //     .id = 2,
+    //     .mode = DJI_CTRL_MODE_VOLTAGE,
+    //     .pos_pid_cfg = {32.0f, 1.3f, 0.0f, 320.0f},
+    //     .spd_pid_cfg = {50.0f, 500.0f, 0.0f, 25000.0f},
+    // },
+    // /* [Case 4] GM6020 ID:3 (电压模式) */
+    // {
+    //     .type = DJI_MOTOR_TYPE_GM6020,
+    //     .id = 3,
+    //     .mode = DJI_CTRL_MODE_VOLTAGE,
+    //     .pos_pid_cfg = {32.0f, 1.3f, 0.0f, 320.0f},
+    //     .spd_pid_cfg = {50.0f, 500.0f, 0.0f, 25000.0f},
+    // },
 };
 
 #define TEST_MOTOR_CNT (sizeof(g_motor_configs) / sizeof(MotorTestNode_s))
@@ -122,16 +122,16 @@ osal_thread_t g_logic_task_handler;
  */
 static uint32_t get_time_ms(void)
 {
-    return osal_time_ms();
+    return (uint32_t)osal_time_now_monotonic();
 }
 
-static void sleep_until_ms(uint32_t* last_ms, uint32_t period_ms)
+static void sleep_until_ms(osal_time_ms_t* last_ms, uint32_t period_ms)
 {
     if (!last_ms)
         return;
     if (*last_ms == 0U)
         *last_ms = get_time_ms();
-    osal_delay_until_ms(last_ms, period_ms);
+    (void)osal_delay_until(last_ms, period_ms, NULL);
 }
 
 static float get_time_s(void)
@@ -169,12 +169,11 @@ static void motor_node_init(MotorTestNode_s* node)
 void logic_task_func(void* pvParameters)
 {
     uint32_t period_ms = STEP_INTERVAL_MS;
-    uint32_t last_ms = get_time_ms();
-    uint32_t last_print_ms = last_ms;
+    osal_time_ms_t last_ms = get_time_ms();
     (void)pvParameters;
 
     /* 延时 1s 等待系统稳定 */
-    osal_thread_sleep_ms(1000);
+    osal_sleep_ms(1000);
 
     /* 读取当前电机角度作为初始目标(可选) */
     for (int i = 0; i < TEST_MOTOR_CNT; i++)
@@ -200,13 +199,12 @@ void logic_task_func(void* pvParameters)
 void control_task_func(void* pvParameters)
 {
     uint32_t period_ms = 1000 / CONTROL_FREQ_HZ; // 1ms
-    uint32_t last_ms = get_time_ms();
-    uint32_t last_print_ms = last_ms;
+    osal_time_ms_t last_ms = get_time_ms();
     (void)pvParameters;
     g_can1_device_handle = device_find("can1");
     device_open(g_can1_device_handle, CAN_O_INT_RX | CAN_O_INT_TX);
     /* 2. 驱动层初始化 */
-    dji_motor_bus_init(&g_can1_bus, g_can1_device_handle, 0);
+    dji_motor_bus_init(&g_can1_bus, g_can1_device_handle);
     device_ctrl(g_can1_device_handle, CAN_CMD_START, NULL);
 
     /* 3. 初始化配置表中的所有电机 */

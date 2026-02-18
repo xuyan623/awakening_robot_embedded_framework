@@ -1,4 +1,4 @@
-﻿#include "awlib.h"
+#include "awlib.h"
 #include "osal/osal_core.h"
 #include "sync/completion.h"
 
@@ -50,7 +50,7 @@ AwlfRet_e completion_accel_wait(Completion_t completion, size_t timeout_ms)
     {
         return AWLF_ERROR_NULL;
     }
-    if (osal_in_isr())
+    if (osal_is_in_isr())
     {
         return AWLF_ERROR_PARAM;
     }
@@ -61,55 +61,55 @@ AwlfRet_e completion_accel_wait(Completion_t completion, size_t timeout_ms)
         return AWLF_ERROR;
     }
 
-    uint32_t irq_state = osal_irq_save();
+    osal_irq_lock_task();
     if (completion->status == COMP_WAIT)
     {
-        osal_irq_restore(irq_state);
+        osal_irq_unlock_task();
         return AWLF_ERROR_BUSY;
     }
     if (completion->status == COMP_DONE)
     {
         completion->status = COMP_INIT;
         completion->wait_thread = NULL;
-        osal_irq_restore(irq_state);
+        osal_irq_unlock_task();
         return AWLF_OK;
     }
     if (timeout_ms == 0U)
     {
-        osal_irq_restore(irq_state);
+        osal_irq_unlock_task();
         return AWLF_ERROR_TIMEOUT;
     }
     if (completion->wait_thread != NULL)
     {
-        osal_irq_restore(irq_state);
+        osal_irq_unlock_task();
         return AWLF_ERROR_BUSY;
     }
 
     completion->wait_thread = self;
     completion->status = COMP_WAIT;
-    osal_irq_restore(irq_state);
+    osal_irq_unlock_task();
 
     TickType_t ticks = pdMS_TO_TICKS(timeout_ms);
     uint32_t value = ulTaskNotifyTakeIndexed((UBaseType_t)AWLF_FREERTOS_COMPLETION_NOTIFY_INDEX, pdTRUE, ticks);
 
-    irq_state = osal_irq_save();
+    osal_irq_lock_task();
     if (value == 0U && completion->status != COMP_DONE)
     {
         completion->wait_thread = NULL;
         completion->status = COMP_INIT;
-        osal_irq_restore(irq_state);
+        osal_irq_unlock_task();
         return AWLF_ERROR_TIMEOUT;
     }
 
     completion->wait_thread = NULL;
     completion->status = COMP_INIT;
-    osal_irq_restore(irq_state);
+    osal_irq_unlock_task();
     return AWLF_OK;
 }
 
 static void completion_accel_give(TaskHandle_t task_handle)
 {
-    if (osal_in_isr())
+    if (osal_is_in_isr())
     {
         BaseType_t higher_priority_task_woken = pdFALSE;
         vTaskNotifyGiveIndexedFromISR(task_handle, (UBaseType_t)AWLF_FREERTOS_COMPLETION_NOTIFY_INDEX, &higher_priority_task_woken);
@@ -127,8 +127,14 @@ AwlfRet_e completion_accel_done(Completion_t completion)
         return AWLF_ERROR_NULL;
     }
 
-    uint32_t irq_state = osal_irq_save();
+    int in_isr = osal_is_in_isr();
+    osal_irq_isr_state_t isr_state = 0u;
     AwlfRet_e ret = AWLF_ERROR;
+
+    if (in_isr)
+        isr_state = osal_irq_lock_from_isr();
+    else
+        osal_irq_lock_task();
 
     switch (completion->status)
     {
@@ -143,7 +149,10 @@ AwlfRet_e completion_accel_done(Completion_t completion)
             TaskHandle_t task_handle = (TaskHandle_t)completion->wait_thread;
             completion->wait_thread = NULL;
             completion->status = COMP_DONE;
-            osal_irq_restore(irq_state);
+            if (in_isr)
+                osal_irq_unlock_from_isr(isr_state);
+            else
+                osal_irq_unlock_task();
             completion_accel_give(task_handle);
             return AWLF_OK;
         }
@@ -159,7 +168,10 @@ AwlfRet_e completion_accel_done(Completion_t completion)
         break;
     }
 
-    osal_irq_restore(irq_state);
+    if (in_isr)
+        osal_irq_unlock_from_isr(isr_state);
+    else
+        osal_irq_unlock_task();
     return ret;
 }
 

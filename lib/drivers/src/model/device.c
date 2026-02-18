@@ -10,16 +10,16 @@ Device_t device_find(char* name)
     if (!name)
         return NULL;
 
-    uint32_t irq_state = osal_irq_save();
+    osal_irq_lock_task();
     list_for_each_entry(dev_pos, &gDevList, list)
     {
         if (strcmp(dev_pos->__priv.name, name) == 0)
         {
-            osal_irq_restore(irq_state);
+            osal_irq_unlock_task();
             return dev_pos;
         }
     }
-    osal_irq_restore(irq_state);
+    osal_irq_unlock_task();
     return NULL;
 }
 
@@ -28,17 +28,17 @@ AwlfRet_e device_register(Device_t Dev, char* name, uint32_t regparams)
     if (!Dev || !name)
         return AWLF_ERROR_PARAM;
 
-    uint32_t irq_state = osal_irq_save();
+    osal_irq_lock_task();
     if (device_find(name))
     {
         /* 如果设备名冲突，直接返回 */
         // TODO: log
-        osal_irq_restore(irq_state);
+        osal_irq_unlock_task();
         return AWLF_ERR_CONFLICT;
     }
     INIT_LIST_HEAD(&Dev->list);
     list_add_tail(&Dev->list, &gDevList);
-    osal_irq_restore(irq_state);
+    osal_irq_unlock_task();
 
     Dev->__priv.name = name;
     Dev->__priv.regparams = regparams;
@@ -150,7 +150,7 @@ AwlfRet_e device_ctrl(Device_t Dev, size_t cmd, void* args)
     }
     if (Dev->interface->control)
         return Dev->interface->control(Dev, cmd, args);
-    return AWLF_OK;
+    return AWLF_ERROR;
 }
 
 AwlfRet_e device_close(Device_t Dev)

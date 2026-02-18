@@ -18,10 +18,12 @@ target("tar_board")
         local bsp_root = path.join(board_root, "..", "..")
         local awlf_root = path.join(bsp_root, "..", "..")
         local modules_root = path.join(awlf_root, "build", "modules")
+
+        local bsp = import("bsp", {rootdir = bsp_root})
         local awlf = import("awlf", {rootdir = modules_root})
+
         local context = awlf.get_context()
         local board_name = context.board_name
-        local bsp = import("bsp", {rootdir = bsp_root})
         local inputs = bsp.get_board_build_inputs(board_name)
         if inputs.includedirs and #inputs.includedirs > 0 then
             target:add("includedirs", inputs.includedirs, {public = false})

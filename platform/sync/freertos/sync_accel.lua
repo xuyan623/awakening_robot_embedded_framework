@@ -18,9 +18,8 @@ function get_accel_info()
 
     return {
         include_dirs = { include_dir, board_config_dir, portable_dir },
-        defines = {
-            "AWLF_SYNC_ACCEL=1",
-            "AWLF_SYNC_ACCEL_COMPLETION=1",
+        capabilities = {
+            completion = true,
         },
     }
 end

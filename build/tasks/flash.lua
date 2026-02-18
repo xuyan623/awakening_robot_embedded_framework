@@ -15,6 +15,7 @@ task("flash")
             {"t", "target", "kv", "robot_project", "Target name"},
             {"r", "reset", "kv", "true", "Reset before/after flash"},
             {"g", "run", "kv", "true", "Run after flash"},
+            {"n", "native_output", "kv", nil, "Show native flasher CLI output (true/false)"},
         }
     }
     on_run(function()
@@ -298,6 +299,10 @@ task("flash")
                 option.get("run") or read_preset_value(preset, "run"),
                 true
             )
+            ctx.native_output = resolve_bool(
+                option.get("native_output") or read_preset_value(preset, "native_output"),
+                false
+            )
             ctx.program = resolve_jlink_program(
                 option.get("program") or read_preset_value(preset, "program")
             )
@@ -324,12 +329,18 @@ task("flash")
         ---@param ctx table 上下文
         ---@return table ctx
         local function step_execute(ctx)
-            os.runv(ctx.program, {"-CommandFile", ctx.command_path})
+            local command_arguments = {"-CommandFile", ctx.command_path}
+            if ctx.native_output then
+                os.execv(ctx.program, command_arguments)
+            else
+                os.runv(ctx.program, command_arguments)
+            end
             -- 输出实际使用的可执行文件路径与工具链信息
             local toolchain_name = ctx.config and ctx.config.get("toolchain") or "unknown"
             print("[awlf] flash program: " .. tostring(ctx.program))
             print("[awlf] flash firmware: " .. tostring(ctx.firmware))
             print("[awlf] flash toolchain: " .. tostring(toolchain_name))
+            print("[awlf] flash native output: " .. tostring(ctx.native_output))
             return ctx
         end
 

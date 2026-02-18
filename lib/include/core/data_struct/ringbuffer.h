@@ -1,13 +1,7 @@
-/**
- * @brief 单读单写的无锁环形队列
- * @note 无覆写策略，当剩余空间小于尝试写入数据时，真实写入大小为剩余空间大小
- * @note 本队列在同一时刻，可以有一个生产者+一个消费者访问，其余情况必须外部加锁保护以防止竞态
- */
-
 #ifndef RINGBUF_H
 #define RINGBUF_H
 
-#include <stdatomic.h>
+#include "atomic/aw_atomic_simple.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -17,87 +11,103 @@ extern "C"
 {
 #endif
 
-// cpu级 内存屏障
-#define smp_rmb() atomic_thread_fence(memory_order_acquire)
-#define smp_wmb() atomic_thread_fence(memory_order_release)
+/* CPU memory barriers kept for compatibility with existing callers. */
+#define smp_rmb() aw_fence_acq()
+#define smp_wmb() aw_fence_rel()
 
-    typedef struct Ringbuf* Ringbuf_t;
-    typedef struct Ringbuf
-    {
-        unsigned char* buf;        // 数据缓冲区
-        volatile unsigned int in;  // 写指针
-        volatile unsigned int out; // 读指针
-        unsigned int mask;         // 2^n - 1
-        unsigned int esize;        // 容量
-    } Ringbuf_s;
+/*
+ * Single-producer / single-consumer ring buffer.
+ * writePos is only updated by producer.
+ * readPos is only updated by consumer.
+ */
+typedef struct Ringbuf
+{
+    unsigned char* buf;
+    aw_atomic_uint_t writePos;
+    aw_atomic_uint_t readPos;
+    unsigned int mask;  /* capacity = mask + 1, capacity must be power-of-two */
+    unsigned int esize; /* item size in bytes */
+} Ringbuf_s, *Ringbuf_t;
 
-    bool ringbuf_alloc(Ringbuf_t rb, unsigned int item_size, unsigned int item_count, void*(pmalloc)(size_t));
-    bool ringbuf_init(Ringbuf_t rb, uint8_t* buff, unsigned int item_size, unsigned int item_count);
-    void free_ringbuf(Ringbuf_t rb, void (*pfree)(void*));
-    unsigned int ringbuf_in(Ringbuf_t rb, const void* buf, unsigned int item_count);
-    unsigned int ringbuf_out(Ringbuf_t rb, void* buf, unsigned int item_count);
-    unsigned int ringbuf_out_peek(Ringbuf_t rb, void* buf, unsigned int len);
-    unsigned int ringbuf_get_item_linear_space(Ringbuf_t rb, void** dest);
-    unsigned int ringbuf_get_avail_linear_size(Ringbuf_t rb, void** dest);
+bool ringbuf_alloc(Ringbuf_t rb, unsigned int item_size, unsigned int item_count, void* (pmalloc)(size_t));
+bool ringbuf_init(Ringbuf_t rb, uint8_t* buff, unsigned int item_size, unsigned int item_count);
+void free_ringbuf(Ringbuf_t rb, void (*pfree)(void*));
+unsigned int ringbuf_in(Ringbuf_t rb, const void* buf, unsigned int item_count);
+unsigned int ringbuf_out(Ringbuf_t rb, void* buf, unsigned int item_count);
+unsigned int ringbuf_out_peek(Ringbuf_t rb, void* buf, unsigned int len);
+unsigned int ringbuf_get_item_linear_space(Ringbuf_t rb, void** dest);
+unsigned int ringbuf_get_avail_linear_size(Ringbuf_t rb, void** dest);
 
-    // item count in buf
-    static inline unsigned int ringbuf_len(const Ringbuf_t rb)
-    {
-        return rb->in - rb->out;
-    }
+/* Number of used items in the ring buffer. */
+static inline unsigned int ringbuf_len(const Ringbuf_t rb)
+{
+    unsigned int write_pos = aw_load_acq(&rb->writePos);
+    unsigned int read_pos = aw_load_acq(&rb->readPos);
+    return write_pos - read_pos;
+}
 
-    // max item count in buf
-    static inline unsigned int ringbuf_cap(const Ringbuf_t rb)
-    {
-        return (rb->mask + 1);
-    }
+/* Maximum item count in the ring buffer. */
+static inline unsigned int ringbuf_cap(const Ringbuf_t rb)
+{
+    return rb->mask + 1U;
+}
 
-    // avail item count
-    static inline unsigned int ringbuf_avail(const Ringbuf_t rb)
-    {
-        return ringbuf_cap(rb) - ringbuf_len(rb);
-    }
+/* Remaining free item count. */
+static inline unsigned int ringbuf_avail(const Ringbuf_t rb)
+{
+    return ringbuf_cap(rb) - ringbuf_len(rb);
+}
 
-    static inline bool ringbuf_is_full(const Ringbuf_t rb)
-    {
-        return ringbuf_len(rb) > rb->mask;
-    }
+static inline bool ringbuf_is_full(const Ringbuf_t rb)
+{
+    return ringbuf_len(rb) > rb->mask;
+}
 
-    static inline bool ringbuf_is_empty(const Ringbuf_t rb)
-    {
-        return rb->in == rb->out;
-    }
+static inline bool ringbuf_is_empty(const Ringbuf_t rb)
+{
+    unsigned int write_pos = aw_load_acq(&rb->writePos);
+    unsigned int read_pos = aw_load_acq(&rb->readPos);
+    return write_pos == read_pos;
+}
 
-    static inline void ringbuf_update_out(Ringbuf_t rb, unsigned int count)
-    {
-        unsigned int l = rb->in - rb->out;
-        if (count > l)
-            count = l;
-        rb->out += count;
-    }
+static inline void ringbuf_update_out(Ringbuf_t rb, unsigned int count)
+{
+    unsigned int write_pos = aw_load_acq(&rb->writePos);
+    unsigned int read_pos = aw_load_rlx(&rb->readPos);
+    unsigned int used_count = write_pos - read_pos;
 
-    static inline void ringbuf_update_in(Ringbuf_t rb, unsigned int count)
-    {
-        unsigned int avail = ringbuf_avail(rb);
-        if (count > avail)
-            count = avail;
-        rb->in += count;
-    }
+    if (count > used_count)
+        count = used_count;
 
-    static inline unsigned int roundup_pow_of_two(unsigned int v)
-    {
-        v--;
-        v |= v >> 1;
-        v |= v >> 2;
-        v |= v >> 4;
-        v |= v >> 8;
-        v |= v >> 16;
-        v++;
-        return v;
-    }
+    aw_store_rel(&rb->readPos, read_pos + count);
+}
+
+static inline void ringbuf_update_in(Ringbuf_t rb, unsigned int count)
+{
+    unsigned int write_pos = aw_load_rlx(&rb->writePos);
+    unsigned int read_pos = aw_load_acq(&rb->readPos);
+    unsigned int avail_count = ringbuf_cap(rb) - (write_pos - read_pos);
+
+    if (count > avail_count)
+        count = avail_count;
+
+    aw_store_rel(&rb->writePos, write_pos + count);
+}
+
+static inline unsigned int roundup_pow_of_two(unsigned int v)
+{
+    v--;
+    v |= v >> 1;
+    v |= v >> 2;
+    v |= v >> 4;
+    v |= v >> 8;
+    v |= v >> 16;
+    v++;
+    return v;
+}
 
 #ifdef __cplusplus
-} // extern "C"
+} /* extern "C" */
 #endif
 
-#endif // RINGBUF_H
+#endif /* RINGBUF_H */

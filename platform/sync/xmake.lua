@@ -6,6 +6,31 @@ local sync_root = os.scriptdir()
 local lib_root = path.join(sync_root, "..", "..", "lib")
 local sync_source_glob = path.join(lib_root, "source", "sync", "*.c")
 
+--- 解析并注入统一的 SYNC 加速宏入口
+---@param target target 目标对象
+---@param accel_enabled boolean 是否启用任意加速后端
+---@param accel_info table|nil 加速信息
+---@return nil
+local function apply_sync_accel_defines(target, accel_enabled, accel_info)
+    local completion_enabled = false
+    local capabilities = accel_info and accel_info.capabilities or nil
+    if type(capabilities) == "table" and capabilities.completion == true then
+        completion_enabled = true
+    end
+
+    if accel_enabled then
+        target:add("defines", "AWLF_SYNC_ACCEL=1")
+    else
+        target:add("defines", "AWLF_SYNC_ACCEL=0")
+    end
+
+    if completion_enabled then
+        target:add("defines", "AWLF_SYNC_ACCEL_COMPLETION=1")
+    else
+        target:add("defines", "AWLF_SYNC_ACCEL_COMPLETION=0")
+    end
+end
+
 --- @target tar_sync
 --- @brief 同步原语静态库
 --- @details 注入同步原语与可选加速后端实现。
@@ -54,13 +79,10 @@ target("tar_sync")
                     target:add("includedirs", include_dir, {public = false})
                 end
             end
-            if accel_info and accel_info.defines then
-                target:add("defines", accel_info.defines)
-            end
+            apply_sync_accel_defines(target, true, accel_info)
             return
         end
 
-        target:add("defines", "AWLF_SYNC_ACCEL=0")
-        target:add("defines", "AWLF_SYNC_ACCEL_COMPLETION=0")
+        apply_sync_accel_defines(target, false, nil)
     end)
 target_end()

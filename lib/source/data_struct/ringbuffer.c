@@ -1,145 +1,180 @@
 #include "core/data_struct/ringbuffer.h"
-#include <assert.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define is_num_power_of_two(x) ((x) && !(((x) & ((x) - 1))))
+#define is_num_power_of_two(x) ((x) && !(((x) & ((x) - 1U))))
 
 bool ringbuf_init(Ringbuf_t rb, uint8_t* buff, unsigned int item_size, unsigned int item_count)
 {
-    if (!buff)
+    if ((rb == NULL) || (buff == NULL) || (item_size == 0U) || (item_count == 0U))
         return false;
+
     if (!is_num_power_of_two(item_count))
     {
         while (1)
         {
-        }; // TODO : assert
+        }
     }
+
     rb->buf = buff;
     rb->esize = item_size;
-    rb->mask = item_count - 1;
-    rb->in = rb->out = 0;
+    rb->mask = item_count - 1U;
+    aw_store_rlx(&rb->writePos, 0U);
+    aw_store_rlx(&rb->readPos, 0U);
     return true;
 }
 
-bool ringbuf_alloc(Ringbuf_t rb, unsigned int item_size, unsigned int item_count, void*(pmalloc)(size_t))
+bool ringbuf_alloc(Ringbuf_t rb, unsigned int item_size, unsigned int item_count, void* (pmalloc)(size_t))
 {
-    unsigned int item_buf_size = roundup_pow_of_two(item_count);
+    unsigned int item_buf_size;
+
+    if ((rb == NULL) || (item_size == 0U) || (item_count == 0U))
+        return false;
+
+    item_buf_size = roundup_pow_of_two(item_count);
     if (!pmalloc)
         rb->buf = malloc(item_buf_size * item_size);
     else
         rb->buf = pmalloc(item_buf_size * item_size);
-    if (NULL == rb->buf)
-    {
+
+    if (rb->buf == NULL)
         return false;
-    }
+
     memset(rb->buf, 0, item_buf_size * item_size);
     rb->esize = item_size;
-    rb->mask = item_buf_size - 1;
-    rb->in = rb->out = 0;
+    rb->mask = item_buf_size - 1U;
+    aw_store_rlx(&rb->writePos, 0U);
+    aw_store_rlx(&rb->readPos, 0U);
     return true;
 }
 
 void free_ringbuf(Ringbuf_t rb, void (*pfree)(void*))
 {
-    if (rb->buf)
-    {
-        if (!pfree)
-            free(rb->buf);
-        else
-            pfree(rb->buf);
-        rb->buf = NULL;
-    }
+    if ((rb == NULL) || (rb->buf == NULL))
+        return;
+
+    if (!pfree)
+        free(rb->buf);
+    else
+        pfree(rb->buf);
+
+    rb->buf = NULL;
 }
 
-static void inline ringbuf_copy_in(Ringbuf_t rb, const void* src, unsigned int len, unsigned int off)
+static void ringbuf_copy_in(Ringbuf_t rb, const void* src, unsigned int len, unsigned int off)
 {
-    unsigned int size = rb->mask + 1;
+    unsigned int size = rb->mask + 1U;
     unsigned int esize = rb->esize;
-    unsigned int l;
+    unsigned int copy_len;
 
     off &= rb->mask;
-    if (esize != 1)
+    if (esize != 1U)
     {
         off *= esize;
         size *= esize;
         len *= esize;
     }
-    l = len < (size - off) ? len : (size - off);
 
-    memcpy(rb->buf + off, src, l);
-    memcpy(rb->buf, (const unsigned char*)src + l, len - l);
+    copy_len = (len < (size - off)) ? len : (size - off);
+
+    memcpy(rb->buf + off, src, copy_len);
+    memcpy(rb->buf, (const unsigned char*)src + copy_len, len - copy_len);
 }
 
 unsigned int ringbuf_in(Ringbuf_t rb, const void* buf, unsigned int item_count)
 {
-    unsigned int avail = ringbuf_avail(rb);
-    if (item_count > avail)
-        item_count = avail;
+    unsigned int write_pos;
+    unsigned int read_pos;
+    unsigned int avail_count;
 
-    ringbuf_copy_in(rb, buf, item_count, rb->in);
+    write_pos = aw_load_rlx(&rb->writePos);
+    read_pos = aw_load_acq(&rb->readPos);
+    avail_count = ringbuf_cap(rb) - (write_pos - read_pos);
 
-    rb->in += item_count;
+    if (item_count > avail_count)
+        item_count = avail_count;
+
+    ringbuf_copy_in(rb, buf, item_count, write_pos);
+
+    /* Publish write index after payload is fully written. */
+    aw_store_rel(&rb->writePos, write_pos + item_count);
     return item_count;
 }
 
-static void inline ringbuf_copy_out(Ringbuf_t rb, void* dst, unsigned int len, unsigned int off)
+static void ringbuf_copy_out(Ringbuf_t rb, void* dst, unsigned int len, unsigned int off)
 {
-    unsigned int size = rb->mask + 1;
+    unsigned int size = rb->mask + 1U;
     unsigned int esize = rb->esize;
-    unsigned int l;
+    unsigned int copy_len;
 
     off &= rb->mask;
-    if (esize != 1)
+    if (esize != 1U)
     {
         off *= esize;
         size *= esize;
         len *= esize;
     }
-    l = len < (size - off) ? len : (size - off);
 
-    memcpy(dst, rb->buf + off, l);
-    memcpy((unsigned char*)dst + l, rb->buf, len - l);
+    copy_len = (len < (size - off)) ? len : (size - off);
+
+    memcpy(dst, rb->buf + off, copy_len);
+    memcpy((unsigned char*)dst + copy_len, rb->buf, len - copy_len);
 }
 
 unsigned int ringbuf_out(Ringbuf_t rb, void* buf, unsigned int item_count)
 {
+    unsigned int read_pos;
+
+    read_pos = aw_load_rlx(&rb->readPos);
     item_count = ringbuf_out_peek(rb, buf, item_count);
-    rb->out += item_count;
+
+    /* Publish read index after payload is fully consumed. */
+    aw_store_rel(&rb->readPos, read_pos + item_count);
     return item_count;
 }
 
 unsigned int ringbuf_out_peek(Ringbuf_t rb, void* buf, unsigned int len)
 {
-    unsigned int l;
-    l = rb->in - rb->out;
-    if (len > l)
-    {
-        len = l;
-    }
-    ringbuf_copy_out(rb, buf, len, rb->out);
+    unsigned int write_pos;
+    unsigned int read_pos;
+    unsigned int used_count;
+
+    write_pos = aw_load_acq(&rb->writePos);
+    read_pos = aw_load_rlx(&rb->readPos);
+    used_count = write_pos - read_pos;
+
+    if (len > used_count)
+        len = used_count;
+
+    ringbuf_copy_out(rb, buf, len, read_pos);
     return len;
 }
 
 unsigned int ringbuf_get_item_linear_space(Ringbuf_t rb, void** dest)
 {
+    unsigned int write_pos;
+    unsigned int read_pos;
     unsigned int out_off;
     unsigned int in_off;
-    unsigned int linear_size = 0;
-    if (ringbuf_is_empty(rb))
+    unsigned int linear_size = 0U;
+
+    write_pos = aw_load_acq(&rb->writePos);
+    read_pos = aw_load_rlx(&rb->readPos);
+
+    if (write_pos == read_pos)
     {
         *dest = NULL;
-        return 0;
+        return 0U;
     }
 
-    in_off = rb->in & rb->mask;
-    out_off = rb->out & rb->mask; // 获取写指针偏移量
+    in_off = write_pos & rb->mask;
+    out_off = read_pos & rb->mask;
     *dest = &rb->buf[out_off];
 
     if (out_off < in_off)
         linear_size = in_off - out_off;
-    else if (out_off > in_off || ringbuf_is_full(rb))
+    else if ((out_off > in_off) || ((write_pos - read_pos) > rb->mask))
         linear_size = ringbuf_cap(rb) - out_off;
 
     return linear_size;
@@ -147,23 +182,31 @@ unsigned int ringbuf_get_item_linear_space(Ringbuf_t rb, void** dest)
 
 unsigned int ringbuf_get_avail_linear_size(Ringbuf_t rb, void** dest)
 {
+    unsigned int write_pos;
+    unsigned int read_pos;
     unsigned int out_off;
     unsigned int in_off;
     unsigned int linear_size;
 
-    if (ringbuf_is_full(rb))
+    write_pos = aw_load_rlx(&rb->writePos);
+    read_pos = aw_load_acq(&rb->readPos);
+
+    if ((write_pos - read_pos) > rb->mask)
     {
         *dest = NULL;
-        return 0;
+        return 0U;
     }
-    in_off = rb->in & rb->mask;
-    out_off = rb->out & rb->mask;
+
+    in_off = write_pos & rb->mask;
+    out_off = read_pos & rb->mask;
     *dest = &rb->buf[in_off];
+
     if (out_off < in_off)
         linear_size = ringbuf_cap(rb) - in_off;
     else if (out_off > in_off)
         linear_size = out_off - in_off;
     else
         linear_size = ringbuf_cap(rb);
+
     return linear_size;
 }

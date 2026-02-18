@@ -1,6 +1,20 @@
-﻿--- @file awlf/build/toolchains/toolchain_validate.lua
+--- @file awlf/build/toolchains/toolchain_validate.lua
 --- @brief 工具链校验
 --- @details 负责工具链相关校验逻辑。
+
+local MIN_ARMCLANG_VERSION = "6.14"
+local version_check_cache = {}
+
+--- 归一化工具链名称（去掉参数后缀）
+---@param toolchain_name string|nil 工具链名称
+---@return string|nil base_name 基础名称
+local function normalize_toolchain_name(toolchain_name)
+    if type(toolchain_name) ~= "string" or toolchain_name == "" then
+        return toolchain_name
+    end
+    local base = toolchain_name:match("^(.-)%[")
+    return base or toolchain_name
+end
 
 --- 判断列表中是否包含指定参数
 ---@param list table|nil 参数列表
@@ -26,6 +40,57 @@ local function resolve_config_toolchain_name(config)
     return value
 end
 
+--- 解析 armclang 版本号
+---@param output string|nil `armclang --version` 输出
+---@return string|nil version
+local function parse_armclang_version(output)
+    if type(output) ~= "string" or output == "" then
+        return nil
+    end
+    return output:match("Arm Compiler for Embedded%s+(%d+%.%d+%.?%d*)")
+end
+
+--- 读取 armclang 版本号
+---@param toolchain_instance toolchain 工具链实例
+---@return string version armclang 版本
+local function resolve_armclang_version(toolchain_instance)
+    local cc_program = toolchain_instance:tool("cc")
+    if not cc_program then
+        raise("armclang compiler not found after toolchain check")
+    end
+    local output_or_error = os.iorunv(cc_program, {"--version"})
+    local version = parse_armclang_version(output_or_error)
+    if not version then
+        raise("armclang version parse failed from --version output")
+    end
+    return version
+end
+
+--- 校验 armclang 版本下界
+---@param toolchain_instance toolchain 工具链实例
+---@return nil
+local function ensure_armclang_version_supported(toolchain_instance)
+    if version_check_cache.armclang ~= nil then
+        return
+    end
+    local semver = import("core.base.semver")
+    local version = resolve_armclang_version(toolchain_instance)
+    if semver.compare(version, MIN_ARMCLANG_VERSION) < 0 then
+        raise("armclang version not supported: " .. version .. ", require >= " .. MIN_ARMCLANG_VERSION)
+    end
+    version_check_cache.armclang = version
+end
+
+--- 统一校验工具版本
+---@param toolchain_name string|nil 工具链名称
+---@param toolchain_instance toolchain 工具链实例
+---@return nil
+local function ensure_tool_versions_supported(toolchain_name, toolchain_instance)
+    if normalize_toolchain_name(toolchain_name) == "armclang" then
+        ensure_armclang_version_supported(toolchain_instance)
+    end
+end
+
 --- 加载并检查工具链实例
 ---@param toolchain_name string|nil 工具链名称
 ---@return toolchain instance 工具链实例
@@ -48,6 +113,7 @@ function ensure_toolchain_checked(toolchain_name)
         raise("toolchain not loaded: " .. tostring(resolved_name))
     end
     instance:check()
+    ensure_tool_versions_supported(resolved_name, instance)
     return instance
 end
 

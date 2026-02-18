@@ -1,60 +1,133 @@
 #include "osal/osal_thread.h"
 
 #include "FreeRTOS.h"
-#include "osal_time_freertos.h"
 #include "task.h"
 
-int osal_thread_create(osal_thread_t* thread, const osal_thread_attr_t* attr, osal_thread_entry_t entry, void* arg)
+#define OSAL_THREAD_DEFAULT_STACK_DEPTH (512u)
+#define OSAL_THREAD_DEFAULT_PRIORITY (1u)
+
+static int osal_thread_check_task_context(void)
 {
+    int in_isr = osal_is_in_isr();
+    OSAL_ASSERT(in_isr == 0);
+    return (in_isr == 0);
+}
+
+static uint32_t osal_thread_default_stack_size_bytes(void)
+{
+    return (uint32_t)(OSAL_THREAD_DEFAULT_STACK_DEPTH * (uint32_t)sizeof(StackType_t));
+}
+
+static int osal_thread_stack_bytes_to_depth(uint32_t stack_size_bytes, configSTACK_DEPTH_TYPE* stack_depth)
+{
+    uint32_t word_bytes;
+    uint32_t rounded_size_bytes;
+    uint32_t stack_depth_u32;
+
+    if (!stack_depth || stack_size_bytes == 0u)
+        return 0;
+
+    word_bytes = (uint32_t)sizeof(StackType_t);
+    rounded_size_bytes = stack_size_bytes + (word_bytes - 1u);
+    if (rounded_size_bytes < stack_size_bytes)
+        return 0;
+
+    stack_depth_u32 = rounded_size_bytes / word_bytes;
+    if (stack_depth_u32 == 0u)
+        stack_depth_u32 = 1u;
+
+    if ((uint32_t)((configSTACK_DEPTH_TYPE)stack_depth_u32) != stack_depth_u32)
+        return 0;
+
+    *stack_depth = (configSTACK_DEPTH_TYPE)stack_depth_u32;
+    return 1;
+}
+
+osal_status_t osal_thread_create(osal_thread_t* thread, const osal_thread_attr_t* attr, osal_thread_entry_t entry,
+                                 void* arg)
+{
+    configSTACK_DEPTH_TYPE stack_depth = 0;
     TaskHandle_t handle = NULL;
     const char* name = (attr && attr->name) ? attr->name : "osal_thread";
-    uint32_t stack_size = (attr && attr->stack_size) ? attr->stack_size : 512;
-    uint32_t prio = (attr) ? attr->priority : 1;
+    uint32_t stack_size_bytes = (attr && attr->stack_size) ? attr->stack_size : osal_thread_default_stack_size_bytes();
+    uint32_t priority = (attr) ? attr->priority : OSAL_THREAD_DEFAULT_PRIORITY;
 
-    if (!entry)
-        return OSAL_ERR_PARAM;
-    if (xTaskCreate((TaskFunction_t)entry, name, (uint16_t)stack_size, arg, (UBaseType_t)prio, &handle) == pdPASS)
+    if (!thread || !entry)
+        return OSAL_INVALID;
+    if (!osal_thread_check_task_context())
+        return OSAL_INVALID;
+    if (!osal_thread_stack_bytes_to_depth(stack_size_bytes, &stack_depth))
+        return OSAL_INVALID;
+
+    *thread = NULL;
+    if (xTaskCreate((TaskFunction_t)entry, name, stack_depth, arg, (UBaseType_t)priority, &handle) == pdPASS)
     {
-        if (thread)
-            *thread = (osal_thread_t)handle;
+        *thread = (osal_thread_t)handle;
         return OSAL_OK;
     }
-    return OSAL_ERR_NOMEM;
+
+    return OSAL_NO_RESOURCE;
 }
 
 osal_thread_t osal_thread_self(void)
 {
+    if (!osal_thread_check_task_context())
+        return NULL;
+
     return (osal_thread_t)xTaskGetCurrentTaskHandle();
 }
 
-void osal_thread_sleep_ms(uint32_t ms)
+osal_status_t osal_thread_join(osal_thread_t thread, uint32_t timeout_ms)
 {
-    if (osal_in_isr())
-        return;
-    OSAL_ASSERT_IN_TASK();
-    vTaskDelay(osal_ms_to_ticks(ms));
+    if (!thread)
+        return OSAL_INVALID;
+    if (!osal_thread_check_task_context())
+        return OSAL_INVALID;
+
+    (void)timeout_ms;
+    return OSAL_NOT_SUPPORTED;
 }
 
 void osal_thread_yield(void)
 {
+    if (!osal_thread_check_task_context())
+        return;
+
     taskYIELD();
 }
 
 void osal_thread_exit(void)
 {
+    if (!osal_thread_check_task_context())
+        return;
+
     vTaskDelete(NULL);
 }
 
-int osal_thread_delete(osal_thread_t thread)
+osal_status_t osal_thread_terminate(osal_thread_t thread)
 {
+    TaskHandle_t target;
+    TaskHandle_t self;
+
     if (!thread)
-        return OSAL_ERR_PARAM;
-    vTaskDelete((TaskHandle_t)thread);
+        return OSAL_INVALID;
+    if (!osal_thread_check_task_context())
+        return OSAL_INVALID;
+
+    target = (TaskHandle_t)thread;
+    self = xTaskGetCurrentTaskHandle();
+    if (target == self)
+        return OSAL_INVALID;
+
+    vTaskDelete(target);
     return OSAL_OK;
 }
 
-int osal_kernel_start(void)
+osal_status_t osal_kernel_start(void)
 {
+    if (!osal_thread_check_task_context())
+        return OSAL_INVALID;
+
     vTaskStartScheduler();
-    return OSAL_OK;
+    return OSAL_INTERNAL;
 }
