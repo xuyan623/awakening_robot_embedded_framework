@@ -4,4 +4,5 @@
 
 awlf_board_index = {
     "rm-c-board",
+    "rm-a-board",
 }

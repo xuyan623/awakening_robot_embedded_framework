@@ -1,0 +1,19 @@
+; *************************************************************
+; *** Scatter-Loading Description File for STM32F427IIH6    ***
+; *** Generated for RM-A-Board                              ***
+; *************************************************************
+
+LR_IROM1 0x08000000 0x00200000  {    ; 2MB Flash (load region)
+  ER_IROM1 0x08000000 0x00200000  {  ; 2MB Flash (execution region)
+   *.o (RESET, +First)
+   *(InRoot$$Sections)
+   .ANY (+RO)
+   .ANY (+XO)
+  }
+  RW_IRAM1 0x20000000 0x00040000  {  ; 256KB SRAM
+   .ANY (+RW +ZI)
+  }
+  RW_CCMRAM 0x10000000 0x00010000  {  ; 64KB CCMRAM
+   .ANY (+RW +ZI, +First)
+  }
+}
